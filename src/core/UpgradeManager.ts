@@ -1,0 +1,80 @@
+import type { InventorySlot } from "../components/Inventory";
+import {
+  ITEMS,
+  MAX_ITEM_SLOTS,
+  RARITY_WEIGHTS,
+  type Rarity,
+  type ItemDefinition,
+} from "../config/upgrades";
+
+export interface UpgradeChoice {
+  itemId: string;
+  item: ItemDefinition;
+  isNew: boolean;       // true = acquiring new item, false = upgrading existing
+  rarity: Rarity;
+  description: string;  // what this choice does
+  currentLevel: number; // 0 for new items
+}
+
+/** Generate 3 upgrade choices based on current inventory */
+export function generateChoices(inventory: InventorySlot[]): UpgradeChoice[] {
+  const choices: UpgradeChoice[] = [];
+  const pool = buildPool(inventory);
+
+  // Pick 3 unique choices from the pool
+  for (let i = 0; i < 3 && pool.length > 0; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    const picked = pool.splice(idx, 1)[0];
+    choices.push(picked);
+  }
+
+  return choices;
+}
+
+function buildPool(inventory: InventorySlot[]): UpgradeChoice[] {
+  const pool: UpgradeChoice[] = [];
+  const ownedMap = new Map(inventory.map((s) => [s.itemId, s]));
+
+  // New items (if slots available)
+  if (inventory.length < MAX_ITEM_SLOTS) {
+    for (const item of Object.values(ITEMS)) {
+      if (!ownedMap.has(item.id)) {
+        pool.push({
+          itemId: item.id,
+          item,
+          isNew: true,
+          rarity: "normal",
+          description: item.description,
+          currentLevel: 0,
+        });
+      }
+    }
+  }
+
+  // Upgrades for owned items
+  for (const slot of inventory) {
+    const item = ITEMS[slot.itemId];
+    if (!item || slot.level >= item.maxLevel) continue;
+
+    const rarity = rollRarity();
+    pool.push({
+      itemId: slot.itemId,
+      item,
+      isNew: false,
+      rarity,
+      description: item.upgradeDescriptions[rarity],
+      currentLevel: slot.level,
+    });
+  }
+
+  return pool;
+}
+
+function rollRarity(): Rarity {
+  const total = RARITY_WEIGHTS.normal + RARITY_WEIGHTS.rare + RARITY_WEIGHTS.epic;
+  const roll = Math.random() * total;
+
+  if (roll < RARITY_WEIGHTS.normal) return "normal";
+  if (roll < RARITY_WEIGHTS.normal + RARITY_WEIGHTS.rare) return "rare";
+  return "epic";
+}

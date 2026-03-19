@@ -1,11 +1,11 @@
 import type { Component } from "../ecs/types";
-import type { Graphics } from "pixi.js";
+import type { Container } from "pixi.js";
 
 export interface Sprite extends Component {
   readonly type: "Sprite";
-  graphic: Graphics;
+  graphic: Container;
 }
 
-export function createSprite(graphic: Graphics): Sprite {
+export function createSprite(graphic: Container): Sprite {
   return { type: "Sprite", graphic };
 }

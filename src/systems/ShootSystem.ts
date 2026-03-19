@@ -1,7 +1,7 @@
 import type { System } from "../ecs/types";
 import type { World } from "../ecs/World";
 import type { Transform } from "../components/Transform";
-import type { Application } from "pixi.js";
+import type { Container } from "pixi.js";
 import { Graphics } from "pixi.js";
 import { createTransform } from "../components/Transform";
 import { createVelocity } from "../components/Velocity";
@@ -21,12 +21,12 @@ import {
 export class ShootSystem implements System {
   readonly name = "ShootSystem";
   private world: World;
-  private app: Application;
+  private stage: Container;
   private cooldown = 0;
 
-  constructor(world: World, app: Application) {
+  constructor(world: World, stage: Container) {
     this.world = world;
-    this.app = app;
+    this.stage = stage;
   }
 
   update(dt: number): void {
@@ -81,7 +81,7 @@ export class ShootSystem implements System {
     const graphic = new Graphics()
       .circle(0, 0, PROJECTILE_SIZE)
       .fill(PROJECTILE_COLOR);
-    this.app.stage.addChild(graphic);
+    this.stage.addChild(graphic);
 
     this.world.addComponent(entity, createTransform(fromX, fromY, Math.atan2(dy, dx)));
     this.world.addComponent(entity, createVelocity(dirX * PROJECTILE_SPEED, dirY * PROJECTILE_SPEED));

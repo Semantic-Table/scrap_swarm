@@ -3,34 +3,34 @@ import type { World } from "../ecs/World";
 import type { Transform } from "../components/Transform";
 import type { Sprite } from "../components/Sprite";
 import type { WaveState } from "../components/Wave";
-import type { Application } from "pixi.js";
 
-const DESPAWN_MARGIN = 500;
+const DESPAWN_DISTANCE = 1800;
 
-/** Removes enemies that have wandered far off-screen */
+/** Removes enemies that have wandered far from the player */
 export class CleanupSystem implements System {
   readonly name = "CleanupSystem";
   private world: World;
-  private app: Application;
 
-  constructor(world: World, app: Application) {
+  constructor(world: World) {
     this.world = world;
-    this.app = app;
   }
 
   update(_dt: number): void {
+    const players = this.world.query(["PlayerTag", "Transform"]);
+    if (players.length === 0) return;
+
+    const pT = this.world.getComponent<Transform>(players[0], "Transform")!;
     const enemies = this.world.query(["EnemyTag", "Transform"]);
-    const w = this.app.screen.width;
-    const h = this.app.screen.height;
 
     for (const entity of enemies) {
       const t = this.world.getComponent<Transform>(entity, "Transform")!;
+      const dx = t.x - pT.x;
+      const dy = t.y - pT.y;
 
-      if (t.x < -DESPAWN_MARGIN || t.x > w + DESPAWN_MARGIN ||
-          t.y < -DESPAWN_MARGIN || t.y > h + DESPAWN_MARGIN) {
+      if (dx * dx + dy * dy > DESPAWN_DISTANCE * DESPAWN_DISTANCE) {
         const sprite = this.world.getComponent<Sprite>(entity, "Sprite");
         if (sprite) {
-          this.app.stage.removeChild(sprite.graphic);
+          sprite.graphic.removeFromParent();
           sprite.graphic.destroy();
         }
 

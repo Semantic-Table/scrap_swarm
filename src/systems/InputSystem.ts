@@ -1,6 +1,7 @@
 import type { System } from "../ecs/types";
 import type { World } from "../ecs/World";
 import type { Velocity } from "../components/Velocity";
+import type { Transform } from "../components/Transform";
 import type { Input } from "../core/Input";
 import { PLAYER_SPEED } from "../config/constants";
 import { getItemLevel } from "../core/UpgradeEffects";
@@ -16,7 +17,7 @@ export class InputSystem implements System {
   }
 
   update(_dt: number): void {
-    const players = this.world.query(["PlayerTag", "Velocity"]);
+    const players = this.world.query(["PlayerTag", "Velocity", "Transform"]);
 
     // Booster: +10% speed per level
     const boosterLevel = getItemLevel(this.world, "booster");
@@ -42,6 +43,12 @@ export class InputSystem implements System {
 
       vel.vx = dx * speed;
       vel.vy = dy * speed;
+
+      // Update facing direction when moving
+      if (dx !== 0 || dy !== 0) {
+        const transform = this.world.getComponent<Transform>(entity, "Transform")!;
+        transform.rotation = Math.atan2(dy, dx);
+      }
     }
   }
 }

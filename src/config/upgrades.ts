@@ -36,6 +36,18 @@ export interface ItemDefinition {
 }
 
 export const ITEMS: Record<string, ItemDefinition> = {
+  sword: {
+    id: "sword",
+    name: "Épée",
+    description: "Coup d'épée devant le joueur",
+    category: "weapon",
+    maxLevel: 5,
+    upgradeDescriptions: {
+      normal: "Cadence +10%",
+      rare: "Dégâts +1, Portée +15%",
+      epic: "Dégâts +2, Arc +30°, Cadence +20%",
+    },
+  },
   turret: {
     id: "turret",
     name: "Tourelle",
@@ -44,8 +56,8 @@ export const ITEMS: Record<string, ItemDefinition> = {
     maxLevel: 5,
     upgradeDescriptions: {
       normal: "Cadence +10%",
-      rare: "Cadence +20%, Portée +15%",
-      epic: "+1 tourelle",
+      rare: "Cadence +20%, Portée +20%",
+      epic: "+1 tourelle, Cadence +10%",
     },
   },
   tesla: {
@@ -55,9 +67,9 @@ export const ITEMS: Record<string, ItemDefinition> = {
     category: "weapon",
     maxLevel: 5,
     upgradeDescriptions: {
-      normal: "Dégâts +1",
-      rare: "+1 rebond",
-      epic: "+2 rebonds, Dégâts +1",
+      normal: "+1 rebond",
+      rare: "+1 rebond, Dégâts +1",
+      epic: "+2 rebonds, Dégâts +2",
     },
   },
   pulse: {
@@ -67,9 +79,9 @@ export const ITEMS: Record<string, ItemDefinition> = {
     category: "weapon",
     maxLevel: 5,
     upgradeDescriptions: {
-      normal: "Rayon +15%, Cooldown -10%",
+      normal: "Rayon +15%",
       rare: "Rayon +25%, Dégâts +1",
-      epic: "Rayon +40%, Cooldown -25%, Dégâts +1",
+      epic: "Rayon +40%, Dégâts +2, Cooldown -20%",
     },
   },
   magnet: {
@@ -80,8 +92,8 @@ export const ITEMS: Record<string, ItemDefinition> = {
     maxLevel: 5,
     upgradeDescriptions: {
       normal: "Rayon +20%",
-      rare: "Rayon +40%",
-      epic: "Rayon +60%, Vitesse attraction +50%",
+      rare: "Rayon +40%, Vitesse +25%",
+      epic: "Rayon +60%, Vitesse +50%",
     },
   },
   refiner: {
@@ -101,11 +113,11 @@ export const ITEMS: Record<string, ItemDefinition> = {
     name: "Bouclier",
     description: "Absorbe 1 hit, se recharge après un délai",
     category: "utility",
-    maxLevel: 3,
+    maxLevel: 5,
     upgradeDescriptions: {
       normal: "Recharge -15%",
-      rare: "Recharge -30%",
-      epic: "+1 charge",
+      rare: "Recharge -25%, +1 charge",
+      epic: "+2 charges, Recharge -30%",
     },
   },
   booster: {
@@ -118,6 +130,54 @@ export const ITEMS: Record<string, ItemDefinition> = {
       normal: "Vitesse +10%",
       rare: "Vitesse +20%",
       epic: "Vitesse +35%",
+    },
+  },
+  might: {
+    id: "might",
+    name: "Puissance",
+    description: "Augmente les dégâts de toutes les armes",
+    category: "utility",
+    maxLevel: 5,
+    upgradeDescriptions: {
+      normal: "Dégâts +1",
+      rare: "Dégâts +2",
+      epic: "Dégâts +3",
+    },
+  },
+  swiftness: {
+    id: "swiftness",
+    name: "Célérité",
+    description: "Réduit le cooldown de toutes les armes",
+    category: "utility",
+    maxLevel: 5,
+    upgradeDescriptions: {
+      normal: "Cooldown -10%",
+      rare: "Cooldown -15%",
+      epic: "Cooldown -25%",
+    },
+  },
+  reach: {
+    id: "reach",
+    name: "Portée",
+    description: "Augmente la portée de toutes les armes",
+    category: "utility",
+    maxLevel: 5,
+    upgradeDescriptions: {
+      normal: "Portée +15%",
+      rare: "Portée +25%",
+      epic: "Portée +40%",
+    },
+  },
+  multi: {
+    id: "multi",
+    name: "Quantité",
+    description: "Plus de projectiles, rebonds, charges et tourelles",
+    category: "utility",
+    maxLevel: 5,
+    upgradeDescriptions: {
+      normal: "+1 sur toutes les armes",
+      rare: "+1, +1 tourelle/charge",
+      epic: "+2 sur toutes les armes",
     },
   },
 };

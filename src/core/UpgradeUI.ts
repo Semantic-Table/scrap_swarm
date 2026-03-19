@@ -6,13 +6,18 @@ const CARD_WIDTH = 220;
 const CARD_HEIGHT = 280;
 const CARD_GAP = 30;
 const CARD_RADIUS = 12;
+const HIGHLIGHT_COLOR = 0xf5c842;
 
 export class UpgradeUI {
   readonly container: Container;
   private onChoose: ((choice: UpgradeChoice) => void) | null = null;
   private overlay: Graphics;
-  private cards: Container[] = [];
+  private cardContainers: Container[] = [];
+  private cardHighlights: Graphics[] = [];
+  private selectedIndex = 0;
+  private cleanupList: Container[] = [];
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+  private clickHandlers: Array<() => void> = [];
 
   constructor() {
     this.container = new Container();
@@ -30,13 +35,17 @@ export class UpgradeUI {
     onChoose: (choice: UpgradeChoice) => void,
   ): void {
     this.onChoose = onChoose;
+    this.selectedIndex = 0;
 
-    // Clear old cards
-    for (const card of this.cards) {
-      this.container.removeChild(card);
-      card.destroy({ children: true });
+    // Clear old
+    for (const item of this.cleanupList) {
+      this.container.removeChild(item);
+      item.destroy({ children: true });
     }
-    this.cards = [];
+    this.cleanupList = [];
+    this.cardContainers = [];
+    this.cardHighlights = [];
+    this.removeClickHandlers();
 
     // Draw overlay
     this.overlay.clear();
@@ -54,18 +63,32 @@ export class UpgradeUI {
     title.x = screenWidth / 2;
     title.y = screenHeight / 2 - CARD_HEIGHT / 2 - 50;
     this.container.addChild(title);
-    this.cards.push(title as unknown as Container); // cleanup later
+    this.cleanupList.push(title as unknown as Container);
 
     // Cards
     const totalWidth = choices.length * CARD_WIDTH + (choices.length - 1) * CARD_GAP;
     const startX = (screenWidth - totalWidth) / 2;
 
     for (let i = 0; i < choices.length; i++) {
-      const card = this.createCard(choices[i], i + 1);
+      const { card, highlight } = this.createCard(choices[i]);
       card.x = startX + i * (CARD_WIDTH + CARD_GAP);
       card.y = screenHeight / 2 - CARD_HEIGHT / 2;
       this.container.addChild(card);
-      this.cards.push(card);
+      this.cleanupList.push(card);
+      this.cardContainers.push(card);
+      this.cardHighlights.push(highlight);
+
+      // Mouse hover + click
+      card.eventMode = "static";
+      card.cursor = "pointer";
+      const onOver = () => { this.selectedIndex = i; this.updateHighlight(); };
+      const onClick = () => { this.pick(choices[i]); };
+      card.on("pointerover", onOver);
+      card.on("pointertap", onClick);
+      this.clickHandlers.push(() => {
+        card.off("pointerover", onOver);
+        card.off("pointertap", onClick);
+      });
     }
 
     // Hint
@@ -74,20 +97,26 @@ export class UpgradeUI {
       fontSize: 16,
       fill: 0x666666,
     });
-    const hint = new Text({ text: "Appuie sur 1, 2, ou 3", style: hintStyle });
+    const hint = new Text({ text: "A/D pour choisir — Espace pour valider", style: hintStyle });
     hint.anchor.set(0.5);
     hint.x = screenWidth / 2;
     hint.y = screenHeight / 2 + CARD_HEIGHT / 2 + 30;
     this.container.addChild(hint);
-    this.cards.push(hint as unknown as Container);
+    this.cleanupList.push(hint as unknown as Container);
 
     this.container.visible = true;
+    this.updateHighlight();
 
     // Keyboard input
     this.keyHandler = (e: KeyboardEvent) => {
-      const idx = ["Digit1", "Digit2", "Digit3"].indexOf(e.code);
-      if (idx >= 0 && idx < choices.length) {
-        this.pick(choices[idx]);
+      if (e.code === "KeyA" || e.code === "KeyQ" || e.code === "ArrowLeft") {
+        this.selectedIndex = (this.selectedIndex - 1 + choices.length) % choices.length;
+        this.updateHighlight();
+      } else if (e.code === "KeyD" || e.code === "ArrowRight") {
+        this.selectedIndex = (this.selectedIndex + 1) % choices.length;
+        this.updateHighlight();
+      } else if (e.code === "Space" || e.code === "Enter") {
+        this.pick(choices[this.selectedIndex]);
       }
     };
     window.addEventListener("keydown", this.keyHandler);
@@ -99,6 +128,12 @@ export class UpgradeUI {
       window.removeEventListener("keydown", this.keyHandler);
       this.keyHandler = null;
     }
+    this.removeClickHandlers();
+  }
+
+  private removeClickHandlers(): void {
+    for (const cleanup of this.clickHandlers) cleanup();
+    this.clickHandlers = [];
   }
 
   private pick(choice: UpgradeChoice): void {
@@ -108,10 +143,33 @@ export class UpgradeUI {
     }
   }
 
-  private createCard(choice: UpgradeChoice, index: number): Container {
+  private updateHighlight(): void {
+    for (let i = 0; i < this.cardHighlights.length; i++) {
+      const highlight = this.cardHighlights[i];
+      const card = this.cardContainers[i];
+      if (i === this.selectedIndex) {
+        highlight.visible = true;
+        card.scale.set(1.05);
+      } else {
+        highlight.visible = false;
+        card.scale.set(1.0);
+      }
+    }
+  }
+
+  private createCard(choice: UpgradeChoice): { card: Container; highlight: Graphics } {
     const card = new Container();
     const rarityColor = RARITY_COLORS[choice.rarity];
     const borderColor = choice.isNew ? 0xf0f0f0 : rarityColor;
+
+    // Selection highlight glow (hidden by default)
+    const highlight = new Graphics();
+    highlight.roundRect(-4, -4, CARD_WIDTH + 8, CARD_HEIGHT + 8, CARD_RADIUS + 2)
+      .stroke({ color: HIGHLIGHT_COLOR, width: 3, alpha: 0.9 });
+    highlight.roundRect(-6, -6, CARD_WIDTH + 12, CARD_HEIGHT + 12, CARD_RADIUS + 4)
+      .stroke({ color: HIGHLIGHT_COLOR, width: 1, alpha: 0.4 });
+    highlight.visible = false;
+    card.addChild(highlight);
 
     // Background
     const bg = new Graphics();
@@ -120,18 +178,6 @@ export class UpgradeUI {
     bg.roundRect(0, 0, CARD_WIDTH, CARD_HEIGHT, CARD_RADIUS)
       .stroke({ color: borderColor, width: 2 });
     card.addChild(bg);
-
-    // Index number
-    const indexStyle = new TextStyle({
-      fontFamily: "monospace",
-      fontSize: 14,
-      fill: 0x666666,
-    });
-    const indexText = new Text({ text: `[${index}]`, style: indexStyle });
-    indexText.x = CARD_WIDTH / 2;
-    indexText.y = 12;
-    indexText.anchor.set(0.5, 0);
-    card.addChild(indexText);
 
     // "NEW" or rarity badge
     const badgeStyle = new TextStyle({
@@ -146,7 +192,7 @@ export class UpgradeUI {
     });
     badge.anchor.set(0.5, 0);
     badge.x = CARD_WIDTH / 2;
-    badge.y = 32;
+    badge.y = 16;
     card.addChild(badge);
 
     // Item name
@@ -161,18 +207,16 @@ export class UpgradeUI {
     const name = new Text({ text: choice.item.name, style: nameStyle });
     name.anchor.set(0.5, 0);
     name.x = CARD_WIDTH / 2;
-    name.y = 55;
+    name.y = 40;
     card.addChild(name);
 
-    // Category icon area (simple shape)
+    // Category icon area
     const icon = new Graphics();
-    const iconY = 100;
+    const iconY = 85;
     if (choice.item.category === "weapon") {
-      // Triangle for weapons
       icon.poly([CARD_WIDTH / 2, iconY, CARD_WIDTH / 2 + 20, iconY + 35, CARD_WIDTH / 2 - 20, iconY + 35])
         .fill(borderColor);
     } else {
-      // Circle for utilities
       icon.circle(CARD_WIDTH / 2, iconY + 17, 18)
         .fill(borderColor);
     }
@@ -190,7 +234,7 @@ export class UpgradeUI {
     const desc = new Text({ text: choice.description, style: descStyle });
     desc.anchor.set(0.5, 0);
     desc.x = CARD_WIDTH / 2;
-    desc.y = 155;
+    desc.y = 140;
     card.addChild(desc);
 
     // Level info
@@ -210,7 +254,6 @@ export class UpgradeUI {
       card.addChild(lvl);
     }
 
-    return card;
+    return { card, highlight };
   }
-
 }

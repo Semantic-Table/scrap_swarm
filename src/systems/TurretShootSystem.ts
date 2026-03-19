@@ -2,7 +2,7 @@ import type { System } from "../ecs/types";
 import type { World } from "../ecs/World";
 import type { Transform } from "../components/Transform";
 import type { TurretTag } from "../components/Turret";
-import type { Application } from "pixi.js";
+import type { Container } from "pixi.js";
 import { Graphics } from "pixi.js";
 import { createTransform } from "../components/Transform";
 import { createVelocity } from "../components/Velocity";
@@ -17,15 +17,16 @@ import {
   PROJECTILE_LIFETIME,
   TURRET_COLOR,
 } from "../config/constants";
+import { getCooldownMult, getRangeMult } from "../core/UpgradeEffects";
 
 export class TurretShootSystem implements System {
   readonly name = "TurretShootSystem";
   private world: World;
-  private app: Application;
+  private stage: Container;
 
-  constructor(world: World, app: Application) {
+  constructor(world: World, stage: Container) {
     this.world = world;
-    this.app = app;
+    this.stage = stage;
   }
 
   update(dt: number): void {
@@ -41,7 +42,7 @@ export class TurretShootSystem implements System {
       const target = this.findClosestEnemy(transform.x, transform.y);
       if (!target) continue;
 
-      tag.shootTimer = tag.shootCooldown;
+      tag.shootTimer = tag.shootCooldown * getCooldownMult(this.world);
       this.spawnProjectile(transform.x, transform.y, target.x, target.y);
     }
   }
@@ -50,7 +51,8 @@ export class TurretShootSystem implements System {
     const enemies = this.world.query(["EnemyTag", "Transform"]);
 
     let closest: { x: number; y: number } | null = null;
-    let closestDistSq = TURRET_SHOOT_RANGE * TURRET_SHOOT_RANGE;
+    const range = TURRET_SHOOT_RANGE * getRangeMult(this.world);
+    let closestDistSq = range * range;
 
     for (const entity of enemies) {
       const t = this.world.getComponent<Transform>(entity, "Transform")!;
@@ -81,7 +83,7 @@ export class TurretShootSystem implements System {
     const graphic = new Graphics()
       .circle(0, 0, PROJECTILE_SIZE)
       .fill(TURRET_COLOR);
-    this.app.stage.addChild(graphic);
+    this.stage.addChild(graphic);
 
     this.world.addComponent(entity, createTransform(fromX, fromY, Math.atan2(dy, dx)));
     this.world.addComponent(entity, createVelocity(dirX * PROJECTILE_SPEED, dirY * PROJECTILE_SPEED));

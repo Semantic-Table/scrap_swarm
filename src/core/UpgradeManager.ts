@@ -39,11 +39,12 @@ function buildPool(inventory: InventorySlot[]): UpgradeChoice[] {
   if (inventory.length < MAX_ITEM_SLOTS) {
     for (const item of Object.values(ITEMS)) {
       if (!ownedMap.has(item.id)) {
+        const rarity = rollRarity();
         pool.push({
           itemId: item.id,
           item,
           isNew: true,
-          rarity: "normal",
+          rarity,
           description: item.description,
           currentLevel: 0,
         });

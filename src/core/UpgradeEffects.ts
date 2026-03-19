@@ -2,7 +2,7 @@ import type { World } from "../ecs/World";
 import type { Inventory } from "../components/Inventory";
 import type { ScrapCollector } from "../components/ScrapCollector";
 import type { UpgradeChoice } from "./UpgradeManager";
-import type { Application } from "pixi.js";
+import type { Container } from "pixi.js";
 import { Graphics } from "pixi.js";
 import { createTransform } from "../components/Transform";
 import { createSprite } from "../components/Sprite";
@@ -25,7 +25,7 @@ import {
 export function applyUpgrade(
   choice: UpgradeChoice,
   world: World,
-  app: Application,
+  stage: Container,
 ): void {
   const players = world.query(["PlayerTag", "Inventory"]);
   if (players.length === 0) return;
@@ -36,13 +36,13 @@ export function applyUpgrade(
   if (choice.isNew) {
     // Add new item at level 1
     inventory.slots.push({ itemId: choice.itemId, level: 1 });
-    applyNewItem(choice.itemId, world, app, playerId);
+    applyNewItem(choice.itemId, world, stage, playerId);
   } else {
     // Upgrade existing item
     const slot = inventory.slots.find((s) => s.itemId === choice.itemId);
     if (slot) {
       slot.level++;
-      applyItemUpgrade(choice.itemId, slot.level, choice.rarity, world, app, playerId);
+      applyItemUpgrade(choice.itemId, slot.level, choice.rarity, world, stage, playerId);
     }
   }
 }
@@ -50,13 +50,18 @@ export function applyUpgrade(
 function applyNewItem(
   itemId: string,
   world: World,
-  app: Application,
+  stage: Container,
   playerId: Entity,
 ): void {
   switch (itemId) {
-    case "turret":
-      spawnTurret(world, app, playerId);
+    case "turret": {
+      // Spawn 1 base turret + extra from Quantité passive
+      const multiLevel = getItemLevel(world, "multi");
+      for (let i = 0; i < 1 + multiLevel; i++) {
+        spawnTurret(world, stage, playerId);
+      }
       break;
+    }
     case "tesla":
       // Tesla is handled by TeslaSystem reading inventory
       break;
@@ -71,13 +76,27 @@ function applyNewItem(
       // Handled by ScrapPickupSystem reading inventory
       break;
     case "shield": {
-      // Add shield component with 1 charge, 15s recharge
-      world.addComponent(playerId, createShield(1, 15));
+      // Add shield component with 1 charge + extra from Quantité passive
+      const multiLvl = getItemLevel(world, "multi");
+      world.addComponent(playerId, createShield(1 + multiLvl, 15));
       break;
     }
     case "booster":
       // Handled by InputSystem reading inventory
       break;
+    case "multi": {
+      // One-time effects: +1 turret if player has turrets, +1 shield charge if has shield
+      const turrets = world.query(["TurretTag"]);
+      if (turrets.length > 0) {
+        spawnTurret(world, stage, playerId);
+      }
+      const shieldComp = world.getComponent<Shield>(playerId, "Shield");
+      if (shieldComp) {
+        shieldComp.maxCharges++;
+        shieldComp.charges++;
+      }
+      break;
+    }
   }
 }
 
@@ -86,7 +105,7 @@ function applyItemUpgrade(
   _level: number,
   rarity: string,
   world: World,
-  app: Application,
+  stage: Container,
   playerId: Entity,
 ): void {
   const mult = rarity === "epic" ? 3 : rarity === "rare" ? 2 : 1;
@@ -95,7 +114,7 @@ function applyItemUpgrade(
     case "turret":
       if (rarity === "epic") {
         // Epic = add a turret
-        spawnTurret(world, app, playerId);
+        spawnTurret(world, stage, playerId);
       } else {
         // Reduce cooldown on all turrets
         const turrets = world.query(["TurretTag"]);
@@ -139,17 +158,31 @@ function applyItemUpgrade(
     case "booster":
       // Read by InputSystem from inventory
       break;
+
+    case "multi": {
+      // Each upgrade: +1 turret if has turrets, +1 shield charge if has shield
+      const turretEntities = world.query(["TurretTag"]);
+      if (turretEntities.length > 0) {
+        spawnTurret(world, stage, playerId);
+      }
+      const sh = world.getComponent<Shield>(playerId, "Shield");
+      if (sh) {
+        sh.maxCharges++;
+        sh.charges++;
+      }
+      break;
+    }
   }
 }
 
-function spawnTurret(world: World, app: Application, playerId: Entity): void {
+function spawnTurret(world: World, stage: Container, playerId: Entity): void {
   const entity = world.createEntity();
 
   const s = TURRET_SIZE;
   const graphic = new Graphics()
     .poly([-s, -s * 0.7, s, 0, -s, s * 0.7])
     .fill(TURRET_COLOR);
-  app.stage.addChild(graphic);
+  stage.addChild(graphic);
 
   const turrets = world.query(["TurretTag", "Orbit"]);
   const count = turrets.length;
@@ -176,4 +209,26 @@ export function getItemLevel(world: World, itemId: string): number {
   const inventory = world.getComponent<Inventory>(players[0], "Inventory")!;
   const slot = inventory.slots.find((s) => s.itemId === itemId);
   return slot ? slot.level : 0;
+}
+
+/** Get flat bonus damage from Puissance passive */
+export function getBonusDamage(world: World): number {
+  return getItemLevel(world, "might");
+}
+
+/** Get cooldown multiplier from Célérité passive (< 1 = faster) */
+export function getCooldownMult(world: World): number {
+  const level = getItemLevel(world, "swiftness");
+  return Math.max(0.3, 1 - level * 0.10);
+}
+
+/** Get range multiplier from Portée passive (> 1 = farther) */
+export function getRangeMult(world: World): number {
+  const level = getItemLevel(world, "reach");
+  return 1 + level * 0.15;
+}
+
+/** Get quantity bonus from Quantité passive */
+export function getQuantityBonus(world: World): number {
+  return getItemLevel(world, "multi");
 }

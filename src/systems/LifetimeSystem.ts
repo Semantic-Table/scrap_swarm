@@ -2,17 +2,14 @@ import type { System } from "../ecs/types";
 import type { World } from "../ecs/World";
 import type { Lifetime } from "../components/Lifetime";
 import type { Sprite } from "../components/Sprite";
-import type { Application } from "pixi.js";
 
 /** Destroys entities whose Lifetime has expired */
 export class LifetimeSystem implements System {
   readonly name = "LifetimeSystem";
   private world: World;
-  private app: Application;
 
-  constructor(world: World, app: Application) {
+  constructor(world: World) {
     this.world = world;
-    this.app = app;
   }
 
   update(dt: number): void {
@@ -25,7 +22,7 @@ export class LifetimeSystem implements System {
       if (lifetime.remaining <= 0) {
         const sprite = this.world.getComponent<Sprite>(entity, "Sprite");
         if (sprite) {
-          this.app.stage.removeChild(sprite.graphic);
+          sprite.graphic.removeFromParent();
           sprite.graphic.destroy();
         }
         this.world.destroyEntity(entity);

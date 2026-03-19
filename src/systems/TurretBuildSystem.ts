@@ -2,7 +2,7 @@ import type { System } from "../ecs/types";
 import type { Entity, Component } from "../ecs/types";
 import type { World } from "../ecs/World";
 import type { ScrapCollector } from "../components/ScrapCollector";
-import type { Application } from "pixi.js";
+import type { Container } from "pixi.js";
 import { Graphics } from "pixi.js";
 import { createTransform } from "../components/Transform";
 import { createSprite } from "../components/Sprite";
@@ -21,12 +21,12 @@ import {
 export class TurretBuildSystem implements System {
   readonly name = "TurretBuildSystem";
   private world: World;
-  private app: Application;
+  private stage: Container;
   private turretCount = 0;
 
-  constructor(world: World, app: Application) {
+  constructor(world: World, stage: Container) {
     this.world = world;
-    this.app = app;
+    this.stage = stage;
   }
 
   private get nextCost(): number {
@@ -54,7 +54,7 @@ export class TurretBuildSystem implements System {
     const graphic = new Graphics()
       .poly([-s, -s * 0.7, s, 0, -s, s * 0.7])
       .fill(TURRET_COLOR);
-    this.app.stage.addChild(graphic);
+    this.stage.addChild(graphic);
 
     // Spread turrets evenly around the orbit
     const angle = this.turretCount * (Math.PI * 2 / Math.max(1, this.turretCount + 1));

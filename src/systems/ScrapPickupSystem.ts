@@ -3,18 +3,25 @@ import type { World } from "../ecs/World";
 import type { Transform } from "../components/Transform";
 import type { ScrapCollector } from "../components/ScrapCollector";
 import type { Sprite } from "../components/Sprite";
-import type { Application } from "pixi.js";
-import { SCRAP_ATTRACT_SPEED, SCRAP_ATTRACT_RADIUS } from "../config/constants";
+import type { Health } from "../components/Health";
+import type { HealthPickupTag } from "../components/HealthPickup";
+import type { Container } from "pixi.js";
+import { SCRAP_ATTRACT_SPEED, SCRAP_ATTRACT_RADIUS, PLAYER_SIZE } from "../config/constants";
 import { getItemLevel } from "../core/UpgradeEffects";
+import { spawnPickupBurst } from "../core/Particles";
+
+/** Actual contact distance for pickup (player size + scrap size) */
+const PICKUP_CONTACT = PLAYER_SIZE + 8;
+const HEALTH_CONTACT = PLAYER_SIZE + 10;
 
 export class ScrapPickupSystem implements System {
   readonly name = "ScrapPickupSystem";
   private world: World;
-  private app: Application;
+  private stage: Container;
 
-  constructor(world: World, app: Application) {
+  constructor(world: World, stage: Container) {
     this.world = world;
-    this.app = app;
+    this.stage = stage;
   }
 
   update(dt: number): void {
@@ -31,7 +38,10 @@ export class ScrapPickupSystem implements System {
 
     // Refiner: bonus scrap per pickup
     const refinerLevel = getItemLevel(this.world, "refiner");
-    const bonusScrap = refinerLevel; // +1 per level
+    const bonusScrap = refinerLevel;
+
+    // Health pickups — contact only, no attraction
+    this.collectHealthPickups(pTransform, players[0]);
 
     const scraps = this.world.query(["ScrapTag", "Transform", "Collider"]);
 
@@ -44,19 +54,52 @@ export class ScrapPickupSystem implements System {
       const dy = pTransform.y - sTransform.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      // Pickup: close enough
-      if (dist <= collector.pickupRadius) {
+      // Pickup: actual contact with player
+      if (dist <= PICKUP_CONTACT) {
         collector.amount += 1 + bonusScrap;
+        spawnPickupBurst(this.stage, sTransform.x, sTransform.y);
         this.removeEntity(scrap);
         continue;
       }
 
-      // Attract: move scrap toward player
+      // Attract: magnet pulls scrap toward player but doesn't collect
       if (dist <= attractRadius && dist > 0) {
         const dirX = dx / dist;
         const dirY = dy / dist;
-        sTransform.x += dirX * attractSpeed * dt;
-        sTransform.y += dirY * attractSpeed * dt;
+        const pull = 1 - (dist / attractRadius);
+        const speed = attractSpeed * (1 + pull * pull * 3);
+        sTransform.x += dirX * speed * dt;
+        sTransform.y += dirY * speed * dt;
+
+        // Scale up scrap as it's pulled (anticipation)
+        const sprite = this.world.getComponent<Sprite>(scrap, "Sprite");
+        if (sprite) {
+          const scale = 1 + pull * 0.5;
+          sprite.graphic.scale.set(scale);
+        }
+      }
+    }
+  }
+
+  private collectHealthPickups(pTransform: Transform, playerId: number): void {
+    const pickups = this.world.query(["HealthPickupTag", "Transform"]);
+    const health = this.world.getComponent<Health>(playerId, "Health");
+    if (!health) return;
+
+    for (const pickup of pickups) {
+      if (!this.world.isAlive(pickup)) continue;
+
+      const t = this.world.getComponent<Transform>(pickup, "Transform")!;
+      const dx = pTransform.x - t.x;
+      const dy = pTransform.y - t.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // Contact only — walk over it to pick up
+      if (dist <= HEALTH_CONTACT) {
+        const tag = this.world.getComponent<HealthPickupTag>(pickup, "HealthPickupTag")!;
+        health.current = Math.min(health.max, health.current + tag.healAmount);
+        spawnPickupBurst(this.stage, t.x, t.y);
+        this.removeEntity(pickup);
       }
     }
   }
@@ -64,7 +107,7 @@ export class ScrapPickupSystem implements System {
   private removeEntity(entity: number): void {
     const sprite = this.world.getComponent<Sprite>(entity, "Sprite");
     if (sprite) {
-      this.app.stage.removeChild(sprite.graphic);
+      sprite.graphic.removeFromParent();
       sprite.graphic.destroy();
     }
     this.world.destroyEntity(entity);

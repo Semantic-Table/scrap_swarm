@@ -95,16 +95,21 @@ export function killEnemy(
       spawnScrap(world, stage, x + offsetX, y + offsetY);
     }
 
-    // 1% chance to drop a health pickup
-    if (Math.random() < HEALTH_DROP_CHANCE) {
-      spawnHealthPickup(world, stage, x, y);
+    // Health pickup: 4% chance but only when player HP below 50%
+    const players = world.query(["PlayerTag", "Health"]);
+    if (players.length > 0) {
+      const pH = world.getComponent<Health>(players[0], "Health");
+      if (pH && pH.current < pH.max * 0.5 && Math.random() < HEALTH_DROP_CHANCE) {
+        spawnHealthPickup(world, stage, x, y);
+      }
     }
 
-    // Decrement wave alive counter
+    // Decrement wave alive counter + track kills
     const managers = world.query(["WaveState"]);
     if (managers.length > 0) {
       const wave = world.getComponent<WaveState>(managers[0], "WaveState")!;
       wave.enemiesAlive = Math.max(0, wave.enemiesAlive - 1);
+      wave.totalKills++;
     }
   }
 

@@ -42,13 +42,16 @@ export class PulseSystem implements System {
 
     this.pulse(pT.x, pT.y, radius, damage);
 
-    // Extra waves from Quantité — delayed expanding pulses
+    // Extra waves from Quantité — staggered 50ms, same damage, cascading radii
     const extra = getQuantityBonus(this.world);
     for (let i = 1; i <= extra; i++) {
-      const delayedRadius = radius * (0.6 + i * 0.2);
+      const waveRadius = radius * (0.7 + i * 0.15);
       setTimeout(() => {
-        this.pulse(pT.x, pT.y, delayedRadius, Math.max(1, damage - 1));
-      }, i * 150);
+        const p2 = this.world.query(["PlayerTag", "Transform"]);
+        if (p2.length === 0) return;
+        const pt2 = this.world.getComponent<Transform>(p2[0], "Transform")!;
+        this.pulse(pt2.x, pt2.y, waveRadius, damage);
+      }, i * 50);
     }
   }
 

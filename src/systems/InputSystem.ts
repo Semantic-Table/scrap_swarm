@@ -29,16 +29,23 @@ export class InputSystem implements System {
       let dx = 0;
       let dy = 0;
 
-      if (this.input.isDown("KeyW") || this.input.isDown("ArrowUp")) dy -= 1;
-      if (this.input.isDown("KeyS") || this.input.isDown("ArrowDown")) dy += 1;
-      if (this.input.isDown("KeyA") || this.input.isDown("ArrowLeft")) dx -= 1;
-      if (this.input.isDown("KeyD") || this.input.isDown("ArrowRight")) dx += 1;
+      // Touch joystick takes priority
+      if (this.input.isTouching) {
+        dx = this.input.touchDx;
+        dy = this.input.touchDy;
+      } else {
+        // Keyboard
+        if (this.input.isDown("KeyW") || this.input.isDown("ArrowUp")) dy -= 1;
+        if (this.input.isDown("KeyS") || this.input.isDown("ArrowDown")) dy += 1;
+        if (this.input.isDown("KeyA") || this.input.isDown("ArrowLeft")) dx -= 1;
+        if (this.input.isDown("KeyD") || this.input.isDown("ArrowRight")) dx += 1;
 
-      // Normalize diagonal
-      if (dx !== 0 && dy !== 0) {
-        const inv = 1 / Math.SQRT2;
-        dx *= inv;
-        dy *= inv;
+        // Normalize diagonal
+        if (dx !== 0 && dy !== 0) {
+          const inv = 1 / Math.SQRT2;
+          dx *= inv;
+          dy *= inv;
+        }
       }
 
       vel.vx = dx * speed;

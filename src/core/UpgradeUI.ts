@@ -65,14 +65,17 @@ export class UpgradeUI {
     this.container.addChild(title);
     this.cleanupList.push(title as unknown as Container);
 
-    // Cards
+    // Cards — scale down to fit screen
     const totalWidth = choices.length * CARD_WIDTH + (choices.length - 1) * CARD_GAP;
-    const startX = (screenWidth - totalWidth) / 2;
+    const cardScale = Math.min(1, (screenWidth - 32) / totalWidth, (screenHeight - 160) / CARD_HEIGHT);
+    const scaledTotalW = totalWidth * cardScale;
+    const startX = (screenWidth - scaledTotalW) / 2;
 
     for (let i = 0; i < choices.length; i++) {
       const { card, highlight } = this.createCard(choices[i]);
-      card.x = startX + i * (CARD_WIDTH + CARD_GAP);
-      card.y = screenHeight / 2 - CARD_HEIGHT / 2;
+      card.scale.set(cardScale);
+      card.x = startX + i * (CARD_WIDTH + CARD_GAP) * cardScale;
+      card.y = screenHeight / 2 - (CARD_HEIGHT * cardScale) / 2;
       this.container.addChild(card);
       this.cleanupList.push(card);
       this.cardContainers.push(card);
@@ -97,13 +100,14 @@ export class UpgradeUI {
       fontSize: 16,
       fill: 0x666666,
     });
-    const hint = new Text({ text: "A/D pour choisir — Espace pour valider", style: hintStyle });
+    const hint = new Text({ text: "A/D to select — Space to confirm", style: hintStyle });
     hint.anchor.set(0.5);
     hint.x = screenWidth / 2;
     hint.y = screenHeight / 2 + CARD_HEIGHT / 2 + 30;
     this.container.addChild(hint);
     this.cleanupList.push(hint as unknown as Container);
 
+    this.cardBaseScale = cardScale;
     this.container.visible = true;
     this.updateHighlight();
 
@@ -143,16 +147,18 @@ export class UpgradeUI {
     }
   }
 
+  private cardBaseScale = 1;
+
   private updateHighlight(): void {
     for (let i = 0; i < this.cardHighlights.length; i++) {
       const highlight = this.cardHighlights[i];
       const card = this.cardContainers[i];
       if (i === this.selectedIndex) {
         highlight.visible = true;
-        card.scale.set(1.05);
+        card.scale.set(this.cardBaseScale * 1.05);
       } else {
         highlight.visible = false;
-        card.scale.set(1.0);
+        card.scale.set(this.cardBaseScale);
       }
     }
   }
@@ -187,7 +193,7 @@ export class UpgradeUI {
       fill: choice.isNew ? 0x2ecc71 : rarityColor,
     });
     const badge = new Text({
-      text: choice.isNew ? "NOUVEAU" : RARITY_LABELS[choice.rarity].toUpperCase(),
+      text: choice.isNew ? "NEW" : RARITY_LABELS[choice.rarity].toUpperCase(),
       style: badgeStyle,
     });
     badge.anchor.set(0.5, 0);
@@ -245,7 +251,7 @@ export class UpgradeUI {
         fill: 0x666666,
       });
       const lvl = new Text({
-        text: `Niv. ${choice.currentLevel} → ${choice.currentLevel + 1}`,
+        text: `Lv. ${choice.currentLevel} → ${choice.currentLevel + 1}`,
         style: lvlStyle,
       });
       lvl.anchor.set(0.5, 0);

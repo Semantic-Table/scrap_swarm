@@ -5,8 +5,9 @@ import type { Collider } from "../components/Collider";
 import type { Shield } from "../components/Shield";
 import type { Health } from "../components/Health";
 import type { Sprite } from "../components/Sprite";
-import type { WaveState } from "../components/Wave";
+import type { Container } from "pixi.js";
 import { triggerShake } from "../core/ScreenShake";
+import { killEnemy } from "../core/Combat";
 import { PLAYER_INVINCIBILITY } from "../config/constants";
 
 export type OnPlayerHitCallback = () => void;
@@ -14,11 +15,13 @@ export type OnPlayerHitCallback = () => void;
 export class CollisionSystem implements System {
   readonly name = "CollisionSystem";
   private world: World;
+  private stage: Container;
   private onPlayerDeath: OnPlayerHitCallback;
   private invincibilityTimer = 0;
 
-  constructor(world: World, onPlayerDeath: OnPlayerHitCallback) {
+  constructor(world: World, stage: Container, onPlayerDeath: OnPlayerHitCallback) {
     this.world = world;
+    this.stage = stage;
     this.onPlayerDeath = onPlayerDeath;
   }
 
@@ -61,20 +64,20 @@ export class CollisionSystem implements System {
       const minDist = pCollider.radius + eCollider.radius;
 
       if (distSq <= minDist * minDist) {
-        // Try shield first
+        // Try shield first — enemy dies and drops scrap
         const shield = this.world.getComponent<Shield>(playerId, "Shield");
         if (shield && shield.charges > 0) {
           shield.charges--;
           shield.rechargeTimer = shield.rechargeCooldown;
 
-          this.destroyEnemy(enemy);
+          killEnemy(this.world, this.stage, enemy, eTransform.x, eTransform.y);
           triggerShake(6, 0.15);
           this.invincibilityTimer = PLAYER_INVINCIBILITY * 0.5;
           continue;
         }
 
-        // Take HP damage
-        this.destroyEnemy(enemy);
+        // Take HP damage — enemy dies and drops scrap
+        killEnemy(this.world, this.stage, enemy, eTransform.x, eTransform.y);
         if (this.takeDamage(playerId, 1)) return;
         continue;
       }
@@ -94,6 +97,7 @@ export class CollisionSystem implements System {
       const minDist = pCollider.radius + projC.radius;
 
       if (distSq <= minDist * minDist) {
+        // Destroy projectile
         const sprite = this.world.getComponent<Sprite>(proj, "Sprite");
         if (sprite) {
           sprite.graphic.removeFromParent();
@@ -131,21 +135,5 @@ export class CollisionSystem implements System {
     triggerShake(8, 0.2);
     this.invincibilityTimer = PLAYER_INVINCIBILITY;
     return false;
-  }
-
-  private destroyEnemy(enemy: number): void {
-    const sprite = this.world.getComponent<Sprite>(enemy, "Sprite");
-    if (sprite) {
-      sprite.graphic.removeFromParent();
-      sprite.graphic.destroy();
-    }
-
-    const managers = this.world.query(["WaveState"]);
-    if (managers.length > 0) {
-      const wave = this.world.getComponent<WaveState>(managers[0], "WaveState")!;
-      wave.enemiesAlive = Math.max(0, wave.enemiesAlive - 1);
-    }
-
-    this.world.destroyEntity(enemy);
   }
 }

@@ -4,6 +4,7 @@ import type { Transform } from "../components/Transform";
 import type { Collider } from "../components/Collider";
 import type { Sprite } from "../components/Sprite";
 import type { Health } from "../components/Health";
+import type { ProjectileTag } from "../components/Projectile";
 import type { Container } from "pixi.js";
 import { damageEnemy } from "../core/Combat";
 import { getBonusDamage } from "../core/UpgradeEffects";
@@ -47,10 +48,12 @@ export class ProjectileHitSystem implements System {
           }
           this.world.destroyEntity(proj);
 
-          // Damage enemy (1 base + passive bonus)
+          // Damage enemy (projectile base damage + passive bonus)
           const health = this.world.getComponent<Health>(enemy, "Health");
           if (health) {
-            damageEnemy(this.world, this.stage, enemy, 1 + getBonusDamage(this.world), eT.x, eT.y);
+            const projTag = this.world.getComponent<ProjectileTag>(proj, "ProjectileTag");
+            const baseDmg = projTag ? projTag.damage : 1;
+            damageEnemy(this.world, this.stage, enemy, baseDmg + getBonusDamage(this.world), eT.x, eT.y);
           }
 
           break;

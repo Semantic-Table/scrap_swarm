@@ -136,10 +136,16 @@ export const FLOW_MIN_INTERVAL = 0.2;       // fastest possible spawn rate
 export const FLOW_SPEED_SCALE = 0.15;       // enemy speed increase per minute
 export const FLOW_INTERVAL_SCALE = 0.10;    // spawn interval decrease per minute
 export const FLOW_HP_SCALE_INTERVAL = 270;  // seconds between enemy HP increases
-export const FLOW_TARGET_TIME = 900;        // 15 minutes in seconds
+export const FLOW_TARGET_TIME = 600;        // 10 minutes in seconds
+
+// Horde events — periodic difficulty spikes
+export const HORDE_INTERVAL = 150;          // seconds between horde events (2.5 min)
+export const HORDE_PACK_MULT = 4;           // spawn multiplier during horde
+export const HORDE_DURATION = 8;            // seconds of horde spawning
+export const HORDE_CALM_AFTER = 12;         // seconds of reduced spawns after horde
 
 // Health pickup
-export const HEALTH_DROP_CHANCE = 0.01; // 1% per enemy kill
+export const HEALTH_DROP_CHANCE = 0.04; // 4% per enemy kill (only when player HP < 50%)
 export const HEALTH_PICKUP_SIZE = 8;
 export const HEALTH_PICKUP_COLOR = 0x2ecc71;
 export const HEALTH_PICKUP_HEAL = 2;

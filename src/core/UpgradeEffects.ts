@@ -84,19 +84,10 @@ function applyNewItem(
     case "booster":
       // Handled by InputSystem reading inventory
       break;
-    case "multi": {
-      // One-time effects: +1 turret if player has turrets, +1 shield charge if has shield
-      const turrets = world.query(["TurretTag"]);
-      if (turrets.length > 0) {
-        spawnTurret(world, stage, playerId);
-      }
-      const shieldComp = world.getComponent<Shield>(playerId, "Shield");
-      if (shieldComp) {
-        shieldComp.maxCharges++;
-        shieldComp.charges++;
-      }
+    case "multi":
+      // Dynamic effects only — read by weapon systems via getQuantityBonus()
+      // Turret/shield bonuses are applied when those items are acquired/upgraded
       break;
-    }
   }
 }
 
@@ -159,19 +150,9 @@ function applyItemUpgrade(
       // Read by InputSystem from inventory
       break;
 
-    case "multi": {
-      // Each upgrade: +1 turret if has turrets, +1 shield charge if has shield
-      const turretEntities = world.query(["TurretTag"]);
-      if (turretEntities.length > 0) {
-        spawnTurret(world, stage, playerId);
-      }
-      const sh = world.getComponent<Shield>(playerId, "Shield");
-      if (sh) {
-        sh.maxCharges++;
-        sh.charges++;
-      }
+    case "multi":
+      // Dynamic effects only — read by weapon systems via getQuantityBonus()
       break;
-    }
   }
 }
 

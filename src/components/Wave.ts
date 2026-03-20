@@ -8,6 +8,10 @@ export interface WaveState extends Component {
   spawnInterval: number;  // current interval between spawns
   enemySpeed: number;     // current base enemy speed
   enemiesAlive: number;   // tracking for cleanup
+  hordeTimer: number;     // countdown to next horde event
+  hordeActive: number;    // > 0 while horde is spawning (seconds remaining)
+  hordeCooldown: number;  // > 0 during post-horde calm (seconds remaining)
+  totalKills: number;     // total enemies killed (for end screen stats)
 }
 
 export function createWaveState(): WaveState {
@@ -15,8 +19,12 @@ export function createWaveState(): WaveState {
     type: "WaveState",
     elapsed: 0,
     spawnTimer: 0,
-    spawnInterval: 1.5,
+    spawnInterval: 1.2,
     enemySpeed: 120,
     enemiesAlive: 0,
+    hordeTimer: 0,
+    hordeActive: 0,
+    hordeCooldown: 0,
+    totalKills: 0,
   };
 }

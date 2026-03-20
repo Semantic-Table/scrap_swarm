@@ -4,6 +4,7 @@ import type { ScrapCollector } from "../components/ScrapCollector";
 import type { WaveState } from "../components/Wave";
 import type { PlayerLevel } from "../components/PlayerLevel";
 import type { Inventory } from "../components/Inventory";
+import type { Health } from "../components/Health";
 import { scrapForLevel, ITEMS } from "../config/upgrades";
 import { FLOW_TARGET_TIME } from "../config/constants";
 import { Text, TextStyle, Container, Graphics } from "pixi.js";
@@ -96,6 +97,12 @@ export class HudSystem implements System {
   private announceText: Text;
   private announceTimer = 0;
 
+  // ── HP display ──
+  private hpContainer: Container;
+  private hpGraphics: Graphics;
+  private lastHp = -1;
+  private lastMaxHp = -1;
+
   // ── Item bar ──
   private itemBarContainer: Container;
   private itemSlots: Container[] = [];
@@ -129,7 +136,7 @@ export class HudSystem implements System {
     // ── Level label ─────────────────────────────────────────────────────────
     //    Positioned vertically centred on the bar track
     this.levelLabel = new Text({
-      text: "Niv. 0",
+      text: "Lv. 0",
       style: new TextStyle({
         fontFamily: "monospace",
         fontSize: 12,
@@ -157,6 +164,14 @@ export class HudSystem implements System {
     this.timerText.x = screenWidth / 2;
     this.timerText.y = BAR_Y + BAR_ROW_H + 4;  // 4 px gap below bar row
     hudLayer.addChild(this.timerText);
+
+    // ── HP display (top-right) ────────────────────────────────────────────────
+    this.hpContainer = new Container();
+    this.hpContainer.x = screenWidth - BAR_PAD_X;
+    this.hpContainer.y = BAR_Y + 2;
+    hudLayer.addChild(this.hpContainer);
+    this.hpGraphics = new Graphics();
+    this.hpContainer.addChild(this.hpGraphics);
 
     // ── Announcement text ────────────────────────────────────────────────────
     this.announceText = new Text({
@@ -201,6 +216,25 @@ export class HudSystem implements System {
    * Redraws the fill Graphics.  Called every frame (the Graphics is small —
    * one filled rect + one 2 px edge sliver — so this is essentially free).
    */
+  private drawHpPips(current: number, max: number): void {
+    this.hpGraphics.clear();
+    const pipW = 12;
+    const pipH = 10;
+    const gap = 4;
+    const totalW = max * pipW + (max - 1) * gap;
+
+    for (let i = 0; i < max; i++) {
+      const x = -totalW + i * (pipW + gap);
+      const active = i < current;
+      const color = active ? (current <= 2 ? 0xe74c3c : 0x2ecc71) : 0x333333;
+      this.hpGraphics.roundRect(x, 0, pipW, pipH, 2).fill(color);
+      if (active) {
+        // Bright top highlight
+        this.hpGraphics.roundRect(x, 0, pipW, 3, 2).fill({ color: 0xffffff, alpha: 0.2 });
+      }
+    }
+  }
+
   private drawBarFill(barW: number, ratio: number, flash: number): void {
     this.barFill.clear();
     if (ratio <= 0) return;
@@ -251,7 +285,7 @@ export class HudSystem implements System {
           this.displayFill = 0;  // snap fill back to zero so bar "refills" from scratch
         }
         this.lastLevel = level;
-        this.levelLabel.text = `Niv. ${level}`;
+        this.levelLabel.text = `Lv. ${level}`;
       }
 
       // Offset the label so it never overlaps the fill
@@ -269,6 +303,14 @@ export class HudSystem implements System {
       }
 
       this.drawBarFill(barW, this.displayFill, this.flashTimer);
+
+      // ── HP pips (top-right) ──────────────────────────────────────────────────
+      const health = this.world.getComponent<Health>(playerId, "Health");
+      if (health && (health.current !== this.lastHp || health.max !== this.lastMaxHp)) {
+        this.drawHpPips(health.current, health.max);
+        this.lastHp = health.current;
+        this.lastMaxHp = health.max;
+      }
 
       // ── Item bar ─────────────────────────────────────────────────────────────
       const inventory = this.world.getComponent<Inventory>(playerId, "Inventory");

@@ -15,6 +15,7 @@ import { createScrapCollector } from "../components/ScrapCollector";
 import { createWaveState } from "../components/Wave";
 import { createInventory } from "../components/Inventory";
 import { createPlayerLevel } from "../components/PlayerLevel";
+import type { PlayerLevel } from "../components/PlayerLevel";
 import type { Sprite } from "../components/Sprite";
 import type { WaveState } from "../components/Wave";
 import type { Inventory } from "../components/Inventory";
@@ -86,6 +87,10 @@ export class Game {
 
     document.body.appendChild(this.app.canvas);
 
+    // Remove loading screen
+    const loading = document.getElementById("loading");
+    if (loading) loading.remove();
+
     this.app.ticker.add((ticker) => {
       if (!this.running || this.paused) return;
       // Hit-stop: brief time-slow on heavy kills
@@ -147,7 +152,7 @@ export class Game {
 
     // Start prompt
     const prompt = new Text({
-      text: "[ ENTER ]",
+      text: this.input.isMobile ? "[ TAP TO START ]" : "[ ENTER ]",
       style: new TextStyle({
         fontFamily: "monospace",
         fontSize: 24,
@@ -168,15 +173,24 @@ export class Game {
     };
     this.app.ticker.add(blinkFn);
 
-    const onStart = (e: KeyboardEvent) => {
-      if (e.code === "Enter" || e.code === "Space") {
-        window.removeEventListener("keydown", onStart);
-        this.app.ticker.remove(blinkFn);
-        titleContainer.destroy({ children: true });
-        this.beginGame();
-      }
+    let started = false;
+    const doStart = () => {
+      if (started) return;
+      started = true;
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onTap);
+      this.app.ticker.remove(blinkFn);
+      titleContainer.destroy({ children: true });
+      this.beginGame();
     };
-    window.addEventListener("keydown", onStart);
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "Enter" || e.code === "Space") doStart();
+    };
+    const onTap = () => doStart();
+
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onTap);
   }
 
   private beginGame(): void {
@@ -306,7 +320,7 @@ export class Game {
     this.world.addSystem(new ProjectileHitSystem(this.world, gc));
     this.world.addSystem(new ScrapPickupSystem(this.world, gc));
     this.world.addSystem(new ShieldSystem(this.world));
-    this.world.addSystem(new CollisionSystem(this.world, () => this.gameOver()));
+    this.world.addSystem(new CollisionSystem(this.world, gc, () => this.gameOver()));
     this.world.addSystem(new CleanupSystem(this.world));
     this.world.addSystem(new LifetimeSystem(this.world));
     this.world.addSystem(new RenderSystem(this.world));
@@ -316,12 +330,12 @@ export class Game {
     this.world.addSystem(this.hudSystem);
   }
 
-  private onLevelUp(_level: number): void {
+  private onLevelUp(level: number): void {
     const players = this.world.query(["PlayerTag", "Inventory"]);
     if (players.length === 0) return;
 
     const inventory = this.world.getComponent<Inventory>(players[0], "Inventory")!;
-    const choices = generateChoices(inventory.slots);
+    const choices = generateChoices(inventory.slots, level);
 
     if (choices.length === 0) return;
 
@@ -377,6 +391,23 @@ export class Game {
       sprite.graphic.alpha = 0.4;
     }
 
+    // Gather stats
+    const managers = this.world.query(["WaveState"]);
+    const totalKills = managers.length > 0
+      ? this.world.getComponent<WaveState>(managers[0], "WaveState")!.totalKills
+      : 0;
+    const players = this.world.query(["PlayerTag", "PlayerLevel"]);
+    const playerLevel = players.length > 0
+      ? (this.world.getComponent<PlayerLevel>(players[0], "PlayerLevel")?.level ?? 0)
+      : 0;
+
+    // Save best score to localStorage
+    this.saveBestScore(elapsed, totalKills, playerLevel);
+    const best = this.loadBestScore();
+
+    const cx = this.app.screen.width / 2;
+    const cy = this.app.screen.height / 2;
+
     const style = new TextStyle({
       fontFamily: "monospace",
       fontSize: 48,
@@ -386,24 +417,43 @@ export class Game {
 
     const text = new Text({ text: title, style });
     text.anchor.set(0.5);
-    text.x = this.app.screen.width / 2;
-    text.y = this.app.screen.height / 2 - 30;
+    text.x = cx;
+    text.y = cy - 60;
     this.app.stage.addChild(text);
 
-    const scoreStyle = new TextStyle({
+    // Stats
+    const statsStyle = new TextStyle({
       fontFamily: "monospace",
-      fontSize: 24,
+      fontSize: 18,
       fill: 0xd4a047,
     });
 
-    const score = new Text({
-      text: `Survived ${this.formatTime(elapsed)}`,
-      style: scoreStyle,
-    });
-    score.anchor.set(0.5);
-    score.x = this.app.screen.width / 2;
-    score.y = this.app.screen.height / 2 + 20;
-    this.app.stage.addChild(score);
+    const statsText = [
+      `Time: ${this.formatTime(elapsed)}  |  Kills: ${totalKills}  |  Level: ${playerLevel}`,
+    ].join("\n");
+
+    const stats = new Text({ text: statsText, style: statsStyle });
+    stats.anchor.set(0.5);
+    stats.x = cx;
+    stats.y = cy - 10;
+    this.app.stage.addChild(stats);
+
+    // Best score
+    if (best) {
+      const bestStyle = new TextStyle({
+        fontFamily: "monospace",
+        fontSize: 14,
+        fill: 0x666666,
+      });
+      const bestText = new Text({
+        text: `Best: ${this.formatTime(best.time)}  |  ${best.kills} kills  |  Lv. ${best.level}`,
+        style: bestStyle,
+      });
+      bestText.anchor.set(0.5);
+      bestText.x = cx;
+      bestText.y = cy + 16;
+      this.app.stage.addChild(bestText);
+    }
 
     const subStyle = new TextStyle({
       fontFamily: "monospace",
@@ -411,19 +461,47 @@ export class Game {
       fill: 0x888888,
     });
 
-    const sub = new Text({ text: "R to restart", style: subStyle });
+    const sub = new Text({
+      text: this.input.isMobile ? "Tap to play again" : "R to play again",
+      style: subStyle,
+    });
     sub.anchor.set(0.5);
     sub.x = this.app.screen.width / 2;
     sub.y = this.app.screen.height / 2 + 60;
     this.app.stage.addChild(sub);
 
-    const onRestart = (e: KeyboardEvent) => {
-      if (e.code === "KeyR") {
-        window.removeEventListener("keydown", onRestart);
-        this.restart();
-      }
+    let restarted = false;
+    const doRestart = () => {
+      if (restarted) return;
+      restarted = true;
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onTap);
+      this.restart();
     };
-    window.addEventListener("keydown", onRestart);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "KeyR" || e.code === "Space" || e.code === "Enter") doRestart();
+    };
+    // Delay tap listener slightly to avoid accidental restart
+    const onTap = () => doRestart();
+    window.addEventListener("keydown", onKey);
+    setTimeout(() => window.addEventListener("pointerdown", onTap), 500);
+  }
+
+  private saveBestScore(time: number, kills: number, level: number): void {
+    try {
+      const prev = this.loadBestScore();
+      if (!prev || time > prev.time) {
+        localStorage.setItem("scrapswarm_best", JSON.stringify({ time, kills, level }));
+      }
+    } catch { /* localStorage unavailable */ }
+  }
+
+  private loadBestScore(): { time: number; kills: number; level: number } | null {
+    try {
+      const raw = localStorage.getItem("scrapswarm_best");
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore */ }
+    return null;
   }
 
   private restart(): void {
@@ -445,6 +523,9 @@ export class Game {
     this.paused = false;
     this.running = false;
 
-    this.showTitleScreen();
+    // Direct restart — skip title screen
+    this.createBackground();
+    this.app.stage.addChild(this.background);
+    this.beginGame();
   }
 }

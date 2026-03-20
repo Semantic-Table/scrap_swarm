@@ -64,7 +64,8 @@ export class TeslaSystem implements System {
 
     let fromX = startX;
     let fromY = startY;
-    let range = TESLA_RANGE * getRangeMult(this.world);
+    const rangeMult = getRangeMult(this.world);
+    let range = TESLA_RANGE * rangeMult;
 
     for (let i = 0; i < maxBounces; i++) {
       const target = this.findClosest(fromX, fromY, range, enemies, hit);
@@ -77,7 +78,7 @@ export class TeslaSystem implements System {
 
       fromX = target.x;
       fromY = target.y;
-      range = TESLA_CHAIN_RANGE;
+      range = TESLA_CHAIN_RANGE * rangeMult;
     }
 
     if (chainPoints.length > 1) {

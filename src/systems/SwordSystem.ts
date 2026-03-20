@@ -6,6 +6,7 @@ import type { Container } from "pixi.js";
 import { Graphics } from "pixi.js";
 import { getItemLevel, getBonusDamage, getCooldownMult, getRangeMult, getQuantityBonus } from "../core/UpgradeEffects";
 import { damageEnemy } from "../core/Combat";
+import { hasEvolution } from "../core/EvolutionManager";
 import {
   SWORD_COOLDOWN,
   SWORD_RANGE,
@@ -20,6 +21,8 @@ export class SwordSystem implements System {
   private world: World;
   private stage: Container;
   private timer = 0;
+  private spinAngle = 0;
+  private pendingSlashes: Array<{ delay: number; range: number; arc: number; damage: number }> = [];
 
   constructor(world: World, stage: Container) {
     this.world = world;
@@ -27,34 +30,56 @@ export class SwordSystem implements System {
   }
 
   update(dt: number): void {
+    // Process pending delayed slashes
+    for (let i = this.pendingSlashes.length - 1; i >= 0; i--) {
+      this.pendingSlashes[i].delay -= dt;
+      if (this.pendingSlashes[i].delay <= 0) {
+        const p = this.pendingSlashes.splice(i, 1)[0];
+        const players = this.world.query(["PlayerTag", "Transform"]);
+        if (players.length > 0) {
+          const pT = this.world.getComponent<Transform>(players[0], "Transform")!;
+          this.slash(pT.x, pT.y, pT.rotation, p.range, p.arc, p.damage);
+        }
+      }
+    }
+
     const level = getItemLevel(this.world, "sword");
     if (level <= 0) return;
 
+    const players = this.world.query(["PlayerTag", "Transform"]);
+    if (players.length === 0) return;
+    const pT = this.world.getComponent<Transform>(players[0], "Transform")!;
+
+    const range = (SWORD_RANGE + (level - 1) * 12) * getRangeMult(this.world);
+    const damage = SWORD_DAMAGE + Math.floor((level - 1) / 2) + getBonusDamage(this.world);
+
+    // --- WHIRLWIND evolution: permanent 360° spin ---
+    if (hasEvolution(this.world, "whirlwind")) {
+      this.spinAngle += dt * 8; // fast spin
+      this.timer -= dt;
+      if (this.timer > 0) return;
+      this.timer = 0.15 * getCooldownMult(this.world); // very fast hits
+
+      // Full circle slash at current spin angle
+      this.slash(pT.x, pT.y, this.spinAngle, range * 0.85, Math.PI * 2, Math.max(1, Math.floor(damage * 0.6)));
+      return;
+    }
+
+    // --- Counter Strike evolution: handled by CollisionSystem ---
+
+    // --- Normal sword ---
     this.timer -= dt;
     if (this.timer > 0) return;
 
     this.timer = Math.max(0.2, SWORD_COOLDOWN - (level - 1) * 0.05) * getCooldownMult(this.world);
 
-    const players = this.world.query(["PlayerTag", "Transform"]);
-    if (players.length === 0) return;
-
-    const pT = this.world.getComponent<Transform>(players[0], "Transform")!;
-    const range = (SWORD_RANGE + (level - 1) * 12) * getRangeMult(this.world);
     const arc = SWORD_ARC + (level - 1) * 0.15;
-    const damage = SWORD_DAMAGE + Math.floor((level - 1) / 2) + getBonusDamage(this.world);
-
-    // Base slash
     this.slash(pT.x, pT.y, pT.rotation, range, arc, damage);
 
-    // Extra slashes from Quantité — staggered 50ms apart
+    // Queue extra slashes from Quantité
     const extra = getQuantityBonus(this.world);
     for (let i = 1; i <= extra; i++) {
-      setTimeout(() => {
-        const players2 = this.world.query(["PlayerTag", "Transform"]);
-        if (players2.length === 0) return;
-        const pT2 = this.world.getComponent<Transform>(players2[0], "Transform")!;
-        this.slash(pT2.x, pT2.y, pT2.rotation, range, arc, damage);
-      }, i * 50);
+      this.pendingSlashes.push({ delay: i * 0.05, range, arc, damage });
     }
   }
 

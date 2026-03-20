@@ -84,10 +84,14 @@ function applyNewItem(
     case "booster":
       // Handled by InputSystem reading inventory
       break;
-    case "multi":
-      // Dynamic effects only — read by weapon systems via getQuantityBonus()
-      // Turret/shield bonuses are applied when those items are acquired/upgraded
+    case "multi": {
+      // Turrets are baked entities — spawn extra if player already has turrets
+      const existingTurrets = world.query(["TurretTag"]);
+      if (existingTurrets.length > 0) {
+        spawnTurret(world, stage, playerId);
+      }
       break;
+    }
   }
 }
 
@@ -104,8 +108,11 @@ function applyItemUpgrade(
   switch (itemId) {
     case "turret":
       if (rarity === "epic") {
-        // Epic = add a turret
-        spawnTurret(world, stage, playerId);
+        // Epic = add turrets (1 + multi bonus)
+        const multiBonus = getItemLevel(world, "multi");
+        for (let i = 0; i < 1 + multiBonus; i++) {
+          spawnTurret(world, stage, playerId);
+        }
       } else {
         // Reduce cooldown on all turrets
         const turrets = world.query(["TurretTag"]);
@@ -150,9 +157,14 @@ function applyItemUpgrade(
       // Read by InputSystem from inventory
       break;
 
-    case "multi":
-      // Dynamic effects only — read by weapon systems via getQuantityBonus()
+    case "multi": {
+      // Each upgrade spawns an extra turret if player has turrets
+      const turretEnts = world.query(["TurretTag"]);
+      if (turretEnts.length > 0) {
+        spawnTurret(world, stage, playerId);
+      }
       break;
+    }
   }
 }
 

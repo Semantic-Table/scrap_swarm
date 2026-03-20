@@ -5,6 +5,7 @@ import type { Container } from "pixi.js";
 import { Graphics } from "pixi.js";
 import { getItemLevel, getBonusDamage, getCooldownMult, getRangeMult, getQuantityBonus } from "../core/UpgradeEffects";
 import { damageEnemy } from "../core/Combat";
+import { hasEvolution } from "../core/EvolutionManager";
 import {
   PULSE_COOLDOWN,
   PULSE_RADIUS,
@@ -18,6 +19,7 @@ export class PulseSystem implements System {
   private world: World;
   private stage: Container;
   private timer = 0;
+  private pendingPulses: Array<{ delay: number; radius: number; damage: number }> = [];
 
   constructor(world: World, stage: Container) {
     this.world = world;
@@ -25,6 +27,19 @@ export class PulseSystem implements System {
   }
 
   update(dt: number): void {
+    // Process pending delayed pulses
+    for (let i = this.pendingPulses.length - 1; i >= 0; i--) {
+      this.pendingPulses[i].delay -= dt;
+      if (this.pendingPulses[i].delay <= 0) {
+        const p = this.pendingPulses.splice(i, 1)[0];
+        const players = this.world.query(["PlayerTag", "Transform"]);
+        if (players.length > 0) {
+          const pT = this.world.getComponent<Transform>(players[0], "Transform")!;
+          this.pulse(pT.x, pT.y, p.radius, p.damage);
+        }
+      }
+    }
+
     const level = getItemLevel(this.world, "pulse");
     if (level <= 0) return;
 
@@ -40,18 +55,48 @@ export class PulseSystem implements System {
     const radius = (PULSE_RADIUS + (level - 1) * 20) * getRangeMult(this.world);
     const damage = PULSE_DAMAGE + Math.floor((level - 1) / 2) + getBonusDamage(this.world);
 
+    // --- NOVA evolution: massive explosion with knockback ---
+    if (hasEvolution(this.world, "nova")) {
+      const novaRadius = radius * 2;
+      const novaDamage = damage * 3;
+      this.novaPulse(pT.x, pT.y, novaRadius, novaDamage);
+      this.drawPulse(pT.x, pT.y, novaRadius);
+      return;
+    }
+
+    // --- Normal pulse ---
     this.pulse(pT.x, pT.y, radius, damage);
 
-    // Extra waves from Quantité — staggered 50ms, same damage, cascading radii
+    // Queue extra waves from Quantité
     const extra = getQuantityBonus(this.world);
     for (let i = 1; i <= extra; i++) {
-      const waveRadius = radius * (0.7 + i * 0.15);
-      setTimeout(() => {
-        const p2 = this.world.query(["PlayerTag", "Transform"]);
-        if (p2.length === 0) return;
-        const pt2 = this.world.getComponent<Transform>(p2[0], "Transform")!;
-        this.pulse(pt2.x, pt2.y, waveRadius, damage);
-      }, i * 50);
+      this.pendingPulses.push({ delay: i * 0.05, radius: radius * (0.7 + i * 0.15), damage });
+    }
+  }
+
+  /** Nova: damage + knockback enemies away from center */
+  private novaPulse(cx: number, cy: number, radius: number, damage: number): void {
+    const enemies = this.world.query(["EnemyTag", "Transform"]);
+
+    for (const entity of enemies) {
+      if (!this.world.isAlive(entity)) continue;
+
+      const t = this.world.getComponent<Transform>(entity, "Transform")!;
+      const dx = t.x - cx;
+      const dy = t.y - cy;
+      const distSq = dx * dx + dy * dy;
+
+      if (distSq <= radius * radius && distSq > 0) {
+        damageEnemy(this.world, this.stage, entity, damage, t.x, t.y);
+
+        // Knockback: push enemy away from explosion center
+        if (this.world.isAlive(entity)) {
+          const dist = Math.sqrt(distSq);
+          const knockback = 120 * (1 - dist / radius);
+          t.x += (dx / dist) * knockback;
+          t.y += (dy / dist) * knockback;
+        }
+      }
     }
   }
 

@@ -8,6 +8,7 @@ import type { HealthPickupTag } from "../components/HealthPickup";
 import type { Container } from "pixi.js";
 import { SCRAP_ATTRACT_SPEED, SCRAP_ATTRACT_RADIUS, PLAYER_SIZE } from "../config/constants";
 import { getItemLevel } from "../core/UpgradeEffects";
+import { DEBUG_SCRAP_MULT } from "../config/upgrades";
 import { spawnPickupBurst } from "../core/Particles";
 
 /** Actual contact distance for pickup (player size + scrap size) */
@@ -56,7 +57,7 @@ export class ScrapPickupSystem implements System {
 
       // Pickup: actual contact with player
       if (dist <= PICKUP_CONTACT) {
-        collector.amount += 1 + bonusScrap;
+        collector.amount += (1 + bonusScrap) * DEBUG_SCRAP_MULT;
         spawnPickupBurst(this.stage, sTransform.x, sTransform.y);
         this.removeEntity(scrap);
         continue;

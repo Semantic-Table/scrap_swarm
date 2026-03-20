@@ -104,12 +104,15 @@ export function killEnemy(
       }
     }
 
-    // Decrement wave alive counter + track kills
+    // Decrement wave alive counter + track kills by type
     const managers = world.query(["WaveState"]);
     if (managers.length > 0) {
       const wave = world.getComponent<WaveState>(managers[0], "WaveState")!;
       wave.enemiesAlive = Math.max(0, wave.enemiesAlive - 1);
       wave.totalKills++;
+      if (enemyType) {
+        wave.killsByType[enemyType.name] = (wave.killsByType[enemyType.name] ?? 0) + 1;
+      }
     }
   }
 

@@ -31,26 +31,22 @@ export class RenderSystem implements System {
       const transform = this.world.getComponent<Transform>(entity, "Transform")!;
       const sprite = this.world.getComponent<Sprite>(entity, "Sprite")!;
 
-      sprite.graphic.x = transform.x;
-      sprite.graphic.y = transform.y;
+      // Enemy wobble: ±2px organic jitter
+      if (this.world.hasComponent(entity, "EnemyTag")) {
+        const phase = entity * 1.618;
+        sprite.graphic.x = transform.x + Math.sin(this.elapsed * 7 + phase) * 1.5;
+        sprite.graphic.y = transform.y + Math.cos(this.elapsed * 5.3 + phase) * 1.5;
+      } else {
+        sprite.graphic.x = transform.x;
+        sprite.graphic.y = transform.y;
+      }
+
       sprite.graphic.rotation = transform.rotation;
-    }
 
-    // Enemy swarm wobble — ±2px organic jitter
-    const enemies = this.world.query(["EnemyTag", "Sprite", "Transform"]);
-    for (const entity of enemies) {
-      const transform = this.world.getComponent<Transform>(entity, "Transform")!;
-      const sprite = this.world.getComponent<Sprite>(entity, "Sprite")!;
-      const phase = entity * 1.618;
-      sprite.graphic.x = transform.x + Math.sin(this.elapsed * 7 + phase) * 1.5;
-      sprite.graphic.y = transform.y + Math.cos(this.elapsed * 5.3 + phase) * 1.5;
-    }
-
-    // Scrap idle spin
-    const scraps = this.world.query(["ScrapTag", "Sprite"]);
-    for (const entity of scraps) {
-      const sprite = this.world.getComponent<Sprite>(entity, "Sprite")!;
-      sprite.graphic.rotation += dt * 2.5;
+      // Scrap idle spin
+      if (this.world.hasComponent(entity, "ScrapTag")) {
+        sprite.graphic.rotation += dt * 2.5;
+      }
     }
 
     this.drawPlayerHealthBar();

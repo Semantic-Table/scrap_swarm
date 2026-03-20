@@ -12,6 +12,7 @@ export interface WaveState extends Component {
   hordeActive: number;    // > 0 while horde is spawning (seconds remaining)
   hordeCooldown: number;  // > 0 during post-horde calm (seconds remaining)
   totalKills: number;     // total enemies killed (for end screen stats)
+  killsByType: Record<string, number>; // kills per enemy type name
 }
 
 export function createWaveState(): WaveState {
@@ -22,9 +23,10 @@ export function createWaveState(): WaveState {
     spawnInterval: 1.2,
     enemySpeed: 120,
     enemiesAlive: 0,
-    hordeTimer: 0,
+    hordeTimer: 150,
     hordeActive: 0,
     hordeCooldown: 0,
     totalKills: 0,
+    killsByType: {},
   };
 }

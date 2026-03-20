@@ -18,6 +18,10 @@ const GRID_CELL = 64;
 export class EnemyAISystem implements System {
   readonly name = "EnemyAISystem";
   private world: World;
+  private grid = new Map<number, Entity[]>();
+  private cellPool: Entity[][] = [];
+  private avoidOutX = 0;
+  private avoidOutY = 0;
 
   constructor(world: World) {
     this.world = world;
@@ -30,8 +34,8 @@ export class EnemyAISystem implements System {
     const playerTransform = this.world.getComponent<Transform>(players[0], "Transform")!;
     const enemies = this.world.query(["EnemyTag", "Transform", "Velocity", "Collider"]);
 
-    // Build spatial grid once
-    const grid = this.buildGrid(enemies);
+    // Build spatial grid once (reuses Map + cell arrays)
+    this.buildGrid(enemies);
 
     for (const entity of enemies) {
       const transform = this.world.getComponent<Transform>(entity, "Transform")!;
@@ -58,12 +62,12 @@ export class EnemyAISystem implements System {
         transform.rotation = Math.atan2(dy, dx);
       }
 
-      // --- Avoidance direction ---
-      const avoid = this.getAvoidance(entity, transform, collider, grid);
+      // --- Avoidance direction (writes to this.avoidOutX/Y) ---
+      this.getAvoidance(entity, transform, collider);
 
       // --- Combine: blend chase and avoidance into final direction ---
-      let finalX = chaseX + avoid.x * AVOIDANCE_WEIGHT;
-      let finalY = chaseY + avoid.y * AVOIDANCE_WEIGHT;
+      let finalX = chaseX + this.avoidOutX * AVOIDANCE_WEIGHT;
+      let finalY = chaseY + this.avoidOutY * AVOIDANCE_WEIGHT;
       const finalLen = Math.sqrt(finalX * finalX + finalY * finalY);
 
       if (finalLen > 0) {
@@ -75,16 +79,11 @@ export class EnemyAISystem implements System {
       velocity.vy = finalY * speed;
 
       // --- Hard push: directly move overlapping enemies apart ---
-      this.hardPush(entity, transform, collider, grid, dt);
+      this.hardPush(entity, transform, collider, dt);
     }
   }
 
-  private getAvoidance(
-    entity: Entity,
-    tA: Transform,
-    cA: Collider,
-    grid: Map<number, Entity[]>,
-  ): { x: number; y: number } {
+  private getAvoidance(entity: Entity, tA: Transform, cA: Collider): void {
     let ax = 0;
     let ay = 0;
 
@@ -94,7 +93,7 @@ export class EnemyAISystem implements System {
     for (let ox = -1; ox <= 1; ox++) {
       for (let oy = -1; oy <= 1; oy++) {
         const key = (cx + ox) * 73856093 ^ (cy + oy) * 19349663;
-        const cell = grid.get(key);
+        const cell = this.grid.get(key);
         if (!cell) continue;
 
         for (const other of cell) {
@@ -111,7 +110,6 @@ export class EnemyAISystem implements System {
           if (distSq < avoidDist * avoidDist && distSq > 0.1) {
             const dist = Math.sqrt(distSq);
             const factor = 1 - dist / avoidDist;
-            // Quadratic falloff: much stronger when close
             ax += (dx / dist) * factor * factor;
             ay += (dy / dist) * factor * factor;
           }
@@ -119,28 +117,24 @@ export class EnemyAISystem implements System {
       }
     }
 
-    // Normalize
     const len = Math.sqrt(ax * ax + ay * ay);
     if (len > 0) {
-      return { x: ax / len, y: ay / len };
+      this.avoidOutX = ax / len;
+      this.avoidOutY = ay / len;
+    } else {
+      this.avoidOutX = 0;
+      this.avoidOutY = 0;
     }
-    return { x: 0, y: 0 };
   }
 
-  private hardPush(
-    entity: Entity,
-    tA: Transform,
-    cA: Collider,
-    grid: Map<number, Entity[]>,
-    dt: number,
-  ): void {
+  private hardPush(entity: Entity, tA: Transform, cA: Collider, dt: number): void {
     const cx = Math.floor(tA.x / GRID_CELL);
     const cy = Math.floor(tA.y / GRID_CELL);
 
     for (let ox = -1; ox <= 1; ox++) {
       for (let oy = -1; oy <= 1; oy++) {
         const key = (cx + ox) * 73856093 ^ (cy + oy) * 19349663;
-        const cell = grid.get(key);
+        const cell = this.grid.get(key);
         if (!cell) continue;
 
         for (const other of cell) {
@@ -172,22 +166,25 @@ export class EnemyAISystem implements System {
     }
   }
 
-  private buildGrid(enemies: Entity[]): Map<number, Entity[]> {
-    const grid = new Map<number, Entity[]>();
+  private buildGrid(enemies: Entity[]): void {
+    // Recycle cell arrays into pool
+    for (const cell of this.grid.values()) {
+      cell.length = 0;
+      this.cellPool.push(cell);
+    }
+    this.grid.clear();
 
     for (const entity of enemies) {
       const t = this.world.getComponent<Transform>(entity, "Transform")!;
       const cx = Math.floor(t.x / GRID_CELL);
       const cy = Math.floor(t.y / GRID_CELL);
       const key = cx * 73856093 ^ cy * 19349663;
-      let cell = grid.get(key);
+      let cell = this.grid.get(key);
       if (!cell) {
-        cell = [];
-        grid.set(key, cell);
+        cell = this.cellPool.pop() ?? [];
+        this.grid.set(key, cell);
       }
       cell.push(entity);
     }
-
-    return grid;
   }
 }

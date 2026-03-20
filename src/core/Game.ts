@@ -4,6 +4,9 @@ import { Input } from "./Input";
 import { UpgradeUI } from "./UpgradeUI";
 import { generateChoices } from "./UpgradeManager";
 import { applyUpgrade } from "./UpgradeEffects";
+import { recordRun } from "./Progress";
+import { CodexUI } from "./CodexUI";
+import { DebugUI } from "./DebugUI";
 
 // Components
 import { createTransform } from "../components/Transform";
@@ -15,6 +18,8 @@ import { createScrapCollector } from "../components/ScrapCollector";
 import { createWaveState } from "../components/Wave";
 import { createInventory } from "../components/Inventory";
 import { createPlayerLevel } from "../components/PlayerLevel";
+import { createEvolutionState } from "../components/Evolution";
+import { checkEvolutions } from "./EvolutionManager";
 import type { PlayerLevel } from "../components/PlayerLevel";
 import type { Sprite } from "../components/Sprite";
 import type { WaveState } from "../components/Wave";
@@ -66,6 +71,8 @@ export class Game {
   private background!: TilingSprite;
   private hudSystem: HudSystem | null = null;
   private upgradeUI: UpgradeUI;
+  private codexUI: CodexUI;
+  private debugUI: DebugUI;
   private running = false;
   private paused = false;
 
@@ -76,6 +83,8 @@ export class Game {
     this.gameContainer = new Container();
     this.hudLayer = new Container();
     this.upgradeUI = new UpgradeUI();
+    this.codexUI = new CodexUI();
+    this.debugUI = new DebugUI();
   }
 
   async start(): Promise<void> {
@@ -91,6 +100,39 @@ export class Game {
     const loading = document.getElementById("loading");
     if (loading) loading.remove();
 
+    // Pause when tab is hidden
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        this.app.ticker.stop();
+      } else {
+        this.app.ticker.start();
+      }
+    });
+
+    // F1 to toggle debug panel during gameplay
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "F1" && this.running && !this.paused) {
+        e.preventDefault();
+        this.app.stage.addChild(this.debugUI.container);
+        this.debugUI.toggle(this.world, this.gameContainer, this.app.screen.width, this.app.screen.height);
+      }
+    });
+
+    // Escape to pause + open codex during gameplay
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "Escape" && this.running) {
+        if (this.codexUI.container.visible) {
+          this.codexUI.hide();
+        } else if (!this.paused) {
+          this.paused = true;
+          this.app.stage.addChild(this.codexUI.container);
+          this.codexUI.show(this.app.screen.width, this.app.screen.height, () => {
+            this.paused = false;
+          });
+        }
+      }
+    });
+
     this.app.ticker.add((ticker) => {
       if (!this.running || this.paused) return;
       // Hit-stop: brief time-slow on heavy kills
@@ -98,7 +140,8 @@ export class Game {
         hitStop.timer -= ticker.deltaTime / 60;
         if (hitStop.timer <= 0) hitStop.scale = 1.0;
       }
-      const dt = (ticker.deltaTime / 60) * hitStop.scale;
+      // Cap dt to avoid teleportation after tab switch
+      const dt = Math.min((ticker.deltaTime / 60) * hitStop.scale, 0.1);
       // Animate player ring
       if (this.playerRing) {
         this.playerRing.rotation += dt * 1.5;
@@ -165,6 +208,30 @@ export class Game {
     prompt.y = cy + 60;
     titleContainer.addChild(prompt);
 
+    // Codex button
+    const codexBtn = new Text({
+      text: "[ CODEX ]",
+      style: new TextStyle({
+        fontFamily: "monospace",
+        fontSize: 18,
+        fill: 0x888888,
+      }),
+    });
+    codexBtn.anchor.set(0.5);
+    codexBtn.x = cx;
+    codexBtn.y = cy + 110;
+    codexBtn.eventMode = "static";
+    codexBtn.cursor = "pointer";
+    codexBtn.on("pointerover", () => { codexBtn.style.fill = 0xd4a047; });
+    codexBtn.on("pointerout", () => { codexBtn.style.fill = 0x888888; });
+    codexBtn.on("pointertap", () => {
+      this.app.stage.addChild(this.codexUI.container);
+      this.codexUI.show(this.app.screen.width, this.app.screen.height, () => {
+        // Codex closed — nothing to do, title screen is still there
+      });
+    });
+    titleContainer.addChild(codexBtn);
+
     // Blink the prompt
     let blinkTimer = 0;
     const blinkFn = (ticker: { deltaTime: number }) => {
@@ -175,10 +242,9 @@ export class Game {
 
     let started = false;
     const doStart = () => {
-      if (started) return;
+      if (started || this.codexUI.container.visible) return;
       started = true;
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pointerdown", onTap);
       this.app.ticker.remove(blinkFn);
       titleContainer.destroy({ children: true });
       this.beginGame();
@@ -187,10 +253,20 @@ export class Game {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === "Enter" || e.code === "Space") doStart();
     };
-    const onTap = () => doStart();
-
     window.addEventListener("keydown", onKey);
-    window.addEventListener("pointerdown", onTap);
+
+    // Start button — only the prompt area, not the whole screen
+    prompt.eventMode = "static";
+    prompt.cursor = "pointer";
+    prompt.on("pointertap", () => doStart());
+
+    // Also allow tap on the title/subtitle area (but not codex button)
+    title.eventMode = "static";
+    title.cursor = "pointer";
+    title.on("pointertap", () => doStart());
+    sub.eventMode = "static";
+    sub.cursor = "pointer";
+    sub.on("pointertap", () => doStart());
   }
 
   private beginGame(): void {
@@ -275,6 +351,7 @@ export class Game {
     inventory.slots.push({ itemId: "sword", level: 1 });
     this.world.addComponent(entity, inventory);
     this.world.addComponent(entity, createPlayerLevel());
+    this.world.addComponent(entity, createEvolutionState());
   }
 
   private createWaveManager(): void {
@@ -347,6 +424,17 @@ export class Game {
       this.app.screen.height,
       (choice) => {
         applyUpgrade(choice, this.world, this.gameContainer);
+
+        // Check for weapon evolutions after applying upgrade
+        const evo = checkEvolutions(this.world);
+        if (evo && this.hudSystem) {
+          this.hudSystem.showAnnouncement(
+            `EVOLUTION: ${evo.name}!`,
+            this.app.screen.width,
+            this.app.screen.height,
+          );
+        }
+
         this.paused = false;
       },
     );
@@ -393,15 +481,42 @@ export class Game {
 
     // Gather stats
     const managers = this.world.query(["WaveState"]);
-    const totalKills = managers.length > 0
-      ? this.world.getComponent<WaveState>(managers[0], "WaveState")!.totalKills
-      : 0;
+    const waveState = managers.length > 0
+      ? this.world.getComponent<WaveState>(managers[0], "WaveState")!
+      : null;
+    const totalKills = waveState ? waveState.totalKills : 0;
+    const killsByType = waveState ? waveState.killsByType : {};
     const players = this.world.query(["PlayerTag", "PlayerLevel"]);
     const playerLevel = players.length > 0
       ? (this.world.getComponent<PlayerLevel>(players[0], "PlayerLevel")?.level ?? 0)
       : 0;
 
-    // Save best score to localStorage
+    // Gather discovered items from inventory
+    const discoveredItems: string[] = [];
+    const invPlayers = this.world.query(["PlayerTag", "Inventory"]);
+    if (invPlayers.length > 0) {
+      const inv = this.world.getComponent<Inventory>(invPlayers[0], "Inventory")!;
+      for (const slot of inv.slots) {
+        discoveredItems.push(slot.itemId);
+      }
+    }
+
+    // Gather discovered evolutions
+    const discoveredEvolutions: string[] = [];
+    const evoPlayers = this.world.query(["PlayerTag", "EvolutionState"]);
+    if (evoPlayers.length > 0) {
+      const evoState = this.world.getComponent<import("../components/Evolution").EvolutionState>(
+        evoPlayers[0], "EvolutionState",
+      );
+      if (evoState) {
+        for (const id of evoState.active) discoveredEvolutions.push(id);
+      }
+    }
+
+    // Record progress + check achievements
+    const newAchievements = recordRun(elapsed, killsByType, discoveredItems, discoveredEvolutions);
+
+    // Save best score
     this.saveBestScore(elapsed, totalKills, playerLevel);
     const best = this.loadBestScore();
 
@@ -455,6 +570,24 @@ export class Game {
       this.app.stage.addChild(bestText);
     }
 
+    // Newly unlocked achievements
+    if (newAchievements.length > 0) {
+      const achStyle = new TextStyle({
+        fontFamily: "monospace",
+        fontSize: 16,
+        fontWeight: "bold",
+        fill: 0xf1c40f,
+      });
+      const achText = new Text({
+        text: "🏆 " + newAchievements.join("  |  "),
+        style: achStyle,
+      });
+      achText.anchor.set(0.5);
+      achText.x = cx;
+      achText.y = cy + 40;
+      this.app.stage.addChild(achText);
+    }
+
     const subStyle = new TextStyle({
       fontFamily: "monospace",
       fontSize: 20,
@@ -467,7 +600,7 @@ export class Game {
     });
     sub.anchor.set(0.5);
     sub.x = this.app.screen.width / 2;
-    sub.y = this.app.screen.height / 2 + 60;
+    sub.y = this.app.screen.height / 2 + 80;
     this.app.stage.addChild(sub);
 
     let restarted = false;
@@ -520,6 +653,8 @@ export class Game {
     this.hudLayer = new Container();
     this.hudSystem = null;
     this.upgradeUI = new UpgradeUI();
+    this.codexUI = new CodexUI();
+    this.debugUI = new DebugUI();
     this.paused = false;
     this.running = false;
 

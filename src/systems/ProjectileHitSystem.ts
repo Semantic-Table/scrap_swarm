@@ -40,6 +40,10 @@ export class ProjectileHitSystem implements System {
         const minDist = pC.radius + eC.radius;
 
         if (distSq <= minDist * minDist) {
+          // Read damage BEFORE destroying the projectile
+          const projTag = this.world.getComponent<ProjectileTag>(proj, "ProjectileTag");
+          const baseDmg = projTag ? projTag.damage : 1;
+
           // Destroy projectile
           const pSprite = this.world.getComponent<Sprite>(proj, "Sprite");
           if (pSprite) {
@@ -48,11 +52,9 @@ export class ProjectileHitSystem implements System {
           }
           this.world.destroyEntity(proj);
 
-          // Damage enemy (projectile base damage + passive bonus)
+          // Damage enemy
           const health = this.world.getComponent<Health>(enemy, "Health");
           if (health) {
-            const projTag = this.world.getComponent<ProjectileTag>(proj, "ProjectileTag");
-            const baseDmg = projTag ? projTag.damage : 1;
             damageEnemy(this.world, this.stage, enemy, baseDmg + getBonusDamage(this.world), eT.x, eT.y);
           }
 

@@ -61,7 +61,7 @@ export class SpawnSystem implements System {
     }
 
     // Spawn destructible props periodically
-    this.propTimer -= dt + state.spawnInterval; // count real time elapsed
+    this.propTimer -= dt;
     if (this.propTimer <= 0) {
       this.propTimer = PROP_SPAWN_INTERVAL;
       this.spawnProp();

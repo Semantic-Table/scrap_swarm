@@ -186,11 +186,13 @@ export const ITEMS: Record<string, ItemDefinition> = {
 
 /** Scrap needed to reach level N */
 export function scrapForLevel(level: number): number {
-  // Early levels are cheap (5, 9, 13, 17, 21), curve kicks in after level 5
   const base = 5 + (level - 1) * 4;
   const lateBonus = Math.max(0, level - 5);
   return Math.floor(base + lateBonus * lateBonus * 1.5);
 }
+
+// DEBUG: scrap multiplier — set to 100 for fast leveling, 1 for normal
+export const DEBUG_SCRAP_MULT = 100;
 
 // --- Inventory limits ---
 

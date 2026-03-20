@@ -5,6 +5,7 @@ import type { Container } from "pixi.js";
 import { Graphics } from "pixi.js";
 import { getItemLevel, getBonusDamage, getCooldownMult, getRangeMult, getQuantityBonus } from "../core/UpgradeEffects";
 import { damageEnemy } from "../core/Combat";
+import { hasEvolution } from "../core/EvolutionManager";
 import {
   TESLA_COOLDOWN,
   TESLA_RANGE,
@@ -20,6 +21,7 @@ export class TeslaSystem implements System {
   private world: World;
   private stage: Container;
   private timer = 0;
+  private pendingChains: Array<{ delay: number; bounces: number; damage: number }> = [];
 
   constructor(world: World, stage: Container) {
     this.world = world;
@@ -27,33 +29,69 @@ export class TeslaSystem implements System {
   }
 
   update(dt: number): void {
+    // Process pending delayed chains
+    for (let i = this.pendingChains.length - 1; i >= 0; i--) {
+      this.pendingChains[i].delay -= dt;
+      if (this.pendingChains[i].delay <= 0) {
+        const p = this.pendingChains.splice(i, 1)[0];
+        const players = this.world.query(["PlayerTag", "Transform"]);
+        if (players.length > 0) {
+          const pT = this.world.getComponent<Transform>(players[0], "Transform")!;
+          this.fireChain(pT.x, pT.y, p.bounces, p.damage);
+        }
+      }
+    }
+
     const level = getItemLevel(this.world, "tesla");
     if (level <= 0) return;
 
     this.timer -= dt;
     if (this.timer > 0) return;
 
-    this.timer = TESLA_COOLDOWN * getCooldownMult(this.world);
-
     const players = this.world.query(["PlayerTag", "Transform"]);
     if (players.length === 0) return;
-
     const pT = this.world.getComponent<Transform>(players[0], "Transform")!;
-    const bounces = TESLA_BASE_BOUNCES + (level - 1);
     const damage = TESLA_DAMAGE + Math.floor((level - 1) / 2) + getBonusDamage(this.world);
-    const extra = getQuantityBonus(this.world);
 
-    // Base chain
+    // --- STORM evolution: persistent field hitting all enemies in range ---
+    if (hasEvolution(this.world, "storm")) {
+      this.timer = 0.3 * getCooldownMult(this.world); // tick every 0.3s
+      const stormRange = TESLA_RANGE * getRangeMult(this.world) * 1.3;
+      this.stormField(pT.x, pT.y, stormRange, Math.max(1, Math.floor(damage * 0.5)));
+      return;
+    }
+
+    // --- Normal tesla ---
+    this.timer = TESLA_COOLDOWN * getCooldownMult(this.world);
+    const bounces = TESLA_BASE_BOUNCES + (level - 1);
+
     this.fireChain(pT.x, pT.y, bounces, damage);
 
-    // Extra chains from Quantité — staggered 50ms apart
+    // Queue extra chains from Quantité
+    const extra = getQuantityBonus(this.world);
     for (let i = 1; i <= extra; i++) {
-      setTimeout(() => {
-        const players2 = this.world.query(["PlayerTag", "Transform"]);
-        if (players2.length === 0) return;
-        const pT2 = this.world.getComponent<Transform>(players2[0], "Transform")!;
-        this.fireChain(pT2.x, pT2.y, bounces, damage);
-      }, i * 50);
+      this.pendingChains.push({ delay: i * 0.05, bounces, damage });
+    }
+  }
+
+  private stormField(cx: number, cy: number, range: number, damage: number): void {
+    const enemies = this.world.query(["EnemyTag", "Transform"]);
+    const hitPoints: { x: number; y: number }[] = [{ x: cx, y: cy }];
+
+    for (const entity of enemies) {
+      if (!this.world.isAlive(entity)) continue;
+      const t = this.world.getComponent<Transform>(entity, "Transform")!;
+      const dx = t.x - cx;
+      const dy = t.y - cy;
+      if (dx * dx + dy * dy <= range * range) {
+        damageEnemy(this.world, this.stage, entity, damage, t.x, t.y);
+        hitPoints.push({ x: t.x, y: t.y });
+      }
+    }
+
+    // Visual: draw lightning to all hit enemies
+    if (hitPoints.length > 1) {
+      this.drawLightning(hitPoints);
     }
   }
 

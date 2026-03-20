@@ -7,8 +7,10 @@ import type { Health } from "../components/Health";
 import type { Sprite } from "../components/Sprite";
 import type { Container } from "pixi.js";
 import { triggerShake } from "../core/ScreenShake";
-import { killEnemy } from "../core/Combat";
-import { PLAYER_INVINCIBILITY } from "../config/constants";
+import { killEnemy, damageEnemy } from "../core/Combat";
+import { hasEvolution } from "../core/EvolutionManager";
+import { PLAYER_INVINCIBILITY, SWORD_RANGE, SWORD_DAMAGE } from "../config/constants";
+import { getBonusDamage } from "../core/UpgradeEffects";
 
 export type OnPlayerHitCallback = () => void;
 
@@ -18,6 +20,7 @@ export class CollisionSystem implements System {
   private stage: Container;
   private onPlayerDeath: OnPlayerHitCallback;
   private invincibilityTimer = 0;
+  private dead = false;
 
   constructor(world: World, stage: Container, onPlayerDeath: OnPlayerHitCallback) {
     this.world = world;
@@ -73,6 +76,11 @@ export class CollisionSystem implements System {
           killEnemy(this.world, this.stage, enemy, eTransform.x, eTransform.y);
           triggerShake(6, 0.15);
           this.invincibilityTimer = PLAYER_INVINCIBILITY * 0.5;
+
+          // COUNTER STRIKE evolution: 360° slash on shield absorb
+          if (hasEvolution(this.world, "counter_strike")) {
+            this.counterSlash(pTransform.x, pTransform.y);
+          }
           continue;
         }
 
@@ -120,12 +128,32 @@ export class CollisionSystem implements System {
     }
   }
 
+  /** Counter Strike: 360° damage around player on shield absorb */
+  private counterSlash(cx: number, cy: number): void {
+    const range = SWORD_RANGE * 1.5;
+    const damage = (SWORD_DAMAGE + getBonusDamage(this.world)) * 2;
+    const nearbyEnemies = this.world.query(["EnemyTag", "Transform"]);
+
+    for (const e of nearbyEnemies) {
+      if (!this.world.isAlive(e)) continue;
+      const t = this.world.getComponent<Transform>(e, "Transform")!;
+      const dx = t.x - cx;
+      const dy = t.y - cy;
+      if (dx * dx + dy * dy <= range * range) {
+        damageEnemy(this.world, this.stage, e, damage, t.x, t.y);
+      }
+    }
+    triggerShake(10, 0.2);
+  }
+
   /** Returns true if player died */
   private takeDamage(playerId: number, amount: number): boolean {
     const health = this.world.getComponent<Health>(playerId, "Health");
     if (health) {
       health.current -= amount;
       if (health.current <= 0) {
+        if (this.dead) return true;
+        this.dead = true;
         triggerShake(12, 0.3);
         this.onPlayerDeath();
         return true;

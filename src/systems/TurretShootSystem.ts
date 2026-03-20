@@ -29,8 +29,12 @@ export class TurretShootSystem implements System {
     this.stage = stage;
   }
 
+  /** Targets claimed this frame — reset each update to spread fire */
+  private claimedTargets = new Set<number>();
+
   update(dt: number): void {
     const turrets = this.world.query(["TurretTag", "Transform"]);
+    this.claimedTargets.clear();
 
     for (const turret of turrets) {
       const tag = this.world.getComponent<TurretTag>(turret, "TurretTag")!;
@@ -42,19 +46,23 @@ export class TurretShootSystem implements System {
       const target = this.findClosestEnemy(transform.x, transform.y);
       if (!target) continue;
 
+      this.claimedTargets.add(target.entity);
       tag.shootTimer = tag.shootCooldown * getCooldownMult(this.world);
       this.spawnProjectile(transform.x, transform.y, target.x, target.y);
     }
   }
 
-  private findClosestEnemy(x: number, y: number): { x: number; y: number } | null {
+  private findClosestEnemy(x: number, y: number): { entity: number; x: number; y: number } | null {
     const enemies = this.world.query(["EnemyTag", "Transform"]);
 
-    let closest: { x: number; y: number } | null = null;
+    let closest: { entity: number; x: number; y: number } | null = null;
     const range = TURRET_SHOOT_RANGE * getRangeMult(this.world);
     let closestDistSq = range * range;
 
     for (const entity of enemies) {
+      // Skip targets already claimed by another turret this frame
+      if (this.claimedTargets.has(entity)) continue;
+
       const t = this.world.getComponent<Transform>(entity, "Transform")!;
       const dx = t.x - x;
       const dy = t.y - y;
@@ -62,7 +70,22 @@ export class TurretShootSystem implements System {
 
       if (distSq < closestDistSq) {
         closestDistSq = distSq;
-        closest = { x: t.x, y: t.y };
+        closest = { entity, x: t.x, y: t.y };
+      }
+    }
+
+    // Fallback: if all in range are claimed, allow sharing
+    if (!closest) {
+      closestDistSq = range * range;
+      for (const entity of enemies) {
+        const t = this.world.getComponent<Transform>(entity, "Transform")!;
+        const dx = t.x - x;
+        const dy = t.y - y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq < closestDistSq) {
+          closestDistSq = distSq;
+          closest = { entity, x: t.x, y: t.y };
+        }
       }
     }
 

@@ -10,6 +10,7 @@ export interface EvolutionDef {
 }
 
 export const EVOLUTIONS: EvolutionDef[] = [
+  // --- Original 5 ---
   {
     id: "whirlwind",
     name: "Whirlwind",
@@ -49,5 +50,70 @@ export const EVOLUTIONS: EvolutionDef[] = [
     weaponId: "shield",
     passiveId: "sword",
     color: 0x3498db,
+  },
+  // --- New 8 — one per new weapon ---
+  {
+    id: "buzzsaw",
+    name: "Buzzsaw",
+    description: "Boomerang becomes a permanent orbiting blade that circles the player.",
+    weaponId: "boomerang",
+    passiveId: "swiftness",
+    color: 0xd4a047,
+  },
+  {
+    id: "nuke_field",
+    name: "Nuke Field",
+    description: "Mines become nuclear — massive blast radius, chain reaction on kill.",
+    weaponId: "mine",
+    passiveId: "crit",
+    color: 0xff4444,
+  },
+  {
+    id: "death_ray",
+    name: "Death Ray",
+    description: "Laser becomes a continuous beam that follows the player's aim.",
+    weaponId: "laser",
+    passiveId: "might",
+    color: 0xff0000,
+  },
+  {
+    id: "plague",
+    name: "Plague",
+    description: "Aura infects enemies — they spread poison to others on death.",
+    weaponId: "aura",
+    passiveId: "regen",
+    color: 0x1abc9c,
+  },
+  {
+    id: "railgun",
+    name: "Railgun",
+    description: "Ricochet becomes a piercing rail that goes through all enemies and walls.",
+    weaponId: "ricochet",
+    passiveId: "armor",
+    color: 0xcccccc,
+  },
+  {
+    id: "black_hole",
+    name: "Black Hole",
+    description: "Gravity Well becomes permanent — always active, crushing enemies non-stop.",
+    weaponId: "gravity",
+    passiveId: "magnet",
+    color: 0x6c3483,
+  },
+  {
+    id: "massacre",
+    name: "Massacre",
+    description: "Chain Saw becomes 360° — spins around the player like a ring of death.",
+    weaponId: "chainsaw",
+    passiveId: "booster",
+    color: 0xff6600,
+  },
+  {
+    id: "fortress",
+    name: "Fortress",
+    description: "Sentries become permanent and gain shield — unkillable defense network.",
+    weaponId: "sentry",
+    passiveId: "luck",
+    color: 0xaaaaaa,
   },
 ];

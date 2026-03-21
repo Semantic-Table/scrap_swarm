@@ -36,6 +36,10 @@ export class WaveSystem implements System {
     const state = this.world.getComponent<WaveState>(managers[0], "WaveState")!;
     state.elapsed += dt;
 
+    // Power crate timers (ticked here so they work regardless of bosses)
+    if (state.overclockTimer > 0) state.overclockTimer -= dt;
+    if (state.magnetPulseTimer > 0) state.magnetPulseTimer -= dt;
+
     const elapsed = state.elapsed;
     const minutes = elapsed / 60;
 

@@ -8,9 +8,11 @@ import type { Sprite } from "../components/Sprite";
 import type { Container } from "pixi.js";
 import { triggerShake } from "../core/ScreenShake";
 import { killEnemy, damageEnemy } from "../core/Combat";
+import { playPlayerHit, playShieldAbsorb } from "../core/Audio";
 import { hasEvolution } from "../core/EvolutionManager";
 import { PLAYER_INVINCIBILITY, SWORD_RANGE, SWORD_DAMAGE } from "../config/constants";
-import { getBonusDamage } from "../core/UpgradeEffects";
+import { getBonusDamage, getItemLevel } from "../core/UpgradeEffects";
+import { getGarageInvincibilityBonus } from "../core/GarageEffects";
 
 export type OnPlayerHitCallback = () => void;
 
@@ -28,9 +30,26 @@ export class CollisionSystem implements System {
     this.onPlayerDeath = onPlayerDeath;
   }
 
+  private regenAccum = 0;
+
   update(dt: number): void {
     if (this.invincibilityTimer > 0) {
       this.invincibilityTimer -= dt;
+    }
+
+    // Auto-Repair (regen passive)
+    const regenLevel = getItemLevel(this.world, "regen");
+    if (regenLevel > 0) {
+      this.regenAccum += regenLevel * 0.1 * dt;
+      if (this.regenAccum >= 1) {
+        const healAmt = Math.floor(this.regenAccum);
+        this.regenAccum -= healAmt;
+        const regenPlayers = this.world.query(["PlayerTag", "Health"]);
+        if (regenPlayers.length > 0) {
+          const h = this.world.getComponent<Health>(regenPlayers[0], "Health")!;
+          h.current = Math.min(h.max, h.current + healAmt);
+        }
+      }
     }
 
     const players = this.world.query(["PlayerTag", "Transform", "Collider"]);
@@ -73,6 +92,7 @@ export class CollisionSystem implements System {
           shield.charges--;
           shield.rechargeTimer = shield.rechargeCooldown;
 
+          playShieldAbsorb();
           killEnemy(this.world, this.stage, enemy, eTransform.x, eTransform.y);
           triggerShake(6, 0.15);
           this.invincibilityTimer = PLAYER_INVINCIBILITY * 0.5;
@@ -118,6 +138,7 @@ export class CollisionSystem implements System {
         if (shield && shield.charges > 0) {
           shield.charges--;
           shield.rechargeTimer = shield.rechargeCooldown;
+          playShieldAbsorb();
           triggerShake(4, 0.1);
           this.invincibilityTimer = PLAYER_INVINCIBILITY * 0.3;
           continue;
@@ -150,7 +171,10 @@ export class CollisionSystem implements System {
   private takeDamage(playerId: number, amount: number): boolean {
     const health = this.world.getComponent<Health>(playerId, "Health");
     if (health) {
-      health.current -= amount;
+      // Armor (Plating) reduces damage
+      const armorLevel = getItemLevel(this.world, "armor");
+      const reduced = Math.max(1, amount - armorLevel);
+      health.current -= reduced;
       if (health.current <= 0) {
         if (this.dead) return true;
         this.dead = true;
@@ -160,8 +184,9 @@ export class CollisionSystem implements System {
       }
     }
 
+    playPlayerHit();
     triggerShake(8, 0.2);
-    this.invincibilityTimer = PLAYER_INVINCIBILITY;
+    this.invincibilityTimer = PLAYER_INVINCIBILITY + getGarageInvincibilityBonus();
     return false;
   }
 }

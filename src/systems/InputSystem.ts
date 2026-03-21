@@ -5,6 +5,7 @@ import type { Transform } from "../components/Transform";
 import type { Input } from "../core/Input";
 import { PLAYER_SPEED } from "../config/constants";
 import { getItemLevel } from "../core/UpgradeEffects";
+import { getGarageSpeedMult } from "../core/GarageEffects";
 
 export class InputSystem implements System {
   readonly name = "InputSystem";
@@ -21,7 +22,7 @@ export class InputSystem implements System {
 
     // Booster: +10% speed per level
     const boosterLevel = getItemLevel(this.world, "booster");
-    const speed = PLAYER_SPEED * (1 + boosterLevel * 0.1);
+    const speed = PLAYER_SPEED * (1 + boosterLevel * 0.1) * getGarageSpeedMult();
 
     for (const entity of players) {
       const vel = this.world.getComponent<Velocity>(entity, "Velocity")!;

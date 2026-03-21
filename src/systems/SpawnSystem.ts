@@ -12,6 +12,7 @@ import { createHealth } from "../components/Health";
 import { createEnemyTag } from "../components/Tags";
 import { createEnemyType } from "../components/EnemyType";
 import { createDestructibleTag } from "../components/Destructible";
+import { createCacheTag, createPowerCrateTag } from "../components/MapObject";
 import {
   SPAWN_MARGIN,
   ENEMY_TYPES,
@@ -19,10 +20,16 @@ import {
   ENEMY_PACK_SIZE,
   PACK_SPREAD,
   FLOW_HP_SCALE_INTERVAL,
+  CACHE_SPAWN_INTERVAL, CACHE_SPAWN_DISTANCE, CACHE_SIZE, CACHE_HP, CACHE_COLOR, CACHE_STOP_AT,
+  MAGNETITE_INTERVAL, MAGNETITE_COLOR, MAGNETITE_SPAWN_DIST,
+  OVERCLOCK_INTERVAL, OVERCLOCK_COLOR,
+  REPAIR_COLOR, REPAIR_COOLDOWN,
+  POWER_CRATE_SIZE,
   PROP_SPAWN_INTERVAL,
   PROP_SIZE,
   PROP_COLOR,
   PROP_HP,
+  ENEMY_SPAWN_WEIGHTS,
   type EnemyTypeName,
 } from "../config/constants";
 
@@ -32,6 +39,10 @@ export class SpawnSystem implements System {
   private app: Application;
   private stage: Container;
   private propTimer = 0;
+  private cacheTimer = 0;
+  private magnetiteTimer = 60;
+  private overclockTimer = 90;
+  private repairTimer = REPAIR_COOLDOWN;
 
   constructor(world: World, app: Application, stage: Container) {
     this.world = world;
@@ -44,6 +55,49 @@ export class SpawnSystem implements System {
     if (managers.length === 0) return;
 
     const state = this.world.getComponent<WaveState>(managers[0], "WaveState")!;
+
+    // Spawn destructible props on real time (independent of pack spawns)
+    this.propTimer -= dt;
+    if (this.propTimer <= 0) {
+      this.propTimer = PROP_SPAWN_INTERVAL;
+      this.spawnProp();
+    }
+
+    // Scrap Caches
+    if (state.elapsed < CACHE_STOP_AT) {
+      this.cacheTimer -= dt;
+      if (this.cacheTimer <= 0) {
+        this.cacheTimer = CACHE_SPAWN_INTERVAL;
+        this.spawnCache();
+      }
+    }
+
+    // Power Crates
+    this.magnetiteTimer -= dt;
+    if (this.magnetiteTimer <= 0) {
+      this.magnetiteTimer = MAGNETITE_INTERVAL;
+      this.spawnPowerCrate("magnetite", MAGNETITE_COLOR);
+    }
+    this.overclockTimer -= dt;
+    if (this.overclockTimer <= 0) {
+      this.overclockTimer = OVERCLOCK_INTERVAL;
+      this.spawnPowerCrate("overclock", OVERCLOCK_COLOR);
+    }
+    // Repair crate — timer always ticks, spawns only when HP low
+    this.repairTimer -= dt;
+    if (this.repairTimer <= 0) {
+      const pHealth = this.world.query(["PlayerTag", "Health"]);
+      if (pHealth.length > 0) {
+        const h = this.world.getComponent<import("../components/Health").Health>(pHealth[0], "Health");
+        if (h && h.current <= Math.floor(h.max * 0.6)) {
+          this.spawnPowerCrate("repair", REPAIR_COLOR);
+        }
+      }
+      this.repairTimer = REPAIR_COOLDOWN;
+    }
+
+    // Skip normal spawning while queen is active
+    if (state.queenActive) return;
 
     state.spawnTimer -= dt;
     if (state.spawnTimer > 0) return;
@@ -58,13 +112,6 @@ export class SpawnSystem implements System {
       const offsetX = packSize > 1 ? (Math.random() - 0.5) * PACK_SPREAD : 0;
       const offsetY = packSize > 1 ? (Math.random() - 0.5) * PACK_SPREAD : 0;
       this.spawnEnemy(typeName, x + offsetX, y + offsetY, state);
-    }
-
-    // Spawn destructible props periodically
-    this.propTimer -= dt;
-    if (this.propTimer <= 0) {
-      this.propTimer = PROP_SPAWN_INTERVAL;
-      this.spawnProp();
     }
   }
 
@@ -81,7 +128,17 @@ export class SpawnSystem implements System {
       }
     }
 
-    return available[Math.floor(Math.random() * available.length)];
+    // Weighted random selection
+    let totalWeight = 0;
+    for (const name of available) {
+      totalWeight += ENEMY_SPAWN_WEIGHTS[name];
+    }
+    let roll = Math.random() * totalWeight;
+    for (const name of available) {
+      roll -= ENEMY_SPAWN_WEIGHTS[name];
+      if (roll <= 0) return name;
+    }
+    return available[available.length - 1];
   }
 
   private spawnEnemy(typeName: EnemyTypeName, x: number, y: number, state: WaveState): void {
@@ -218,6 +275,79 @@ export class SpawnSystem implements System {
     this.world.addComponent(entity, createHealth(PROP_HP));
     this.world.addComponent(entity, createEnemyTag()); // targetable by all weapons
     this.world.addComponent(entity, createDestructibleTag());
+  }
+
+  private spawnCache(): void {
+    const players = this.world.query(["PlayerTag", "Transform"]);
+    if (players.length === 0) return;
+    const pT = this.world.getComponent<Transform>(players[0], "Transform")!;
+
+    const angle = Math.random() * Math.PI * 2;
+    const x = pT.x + Math.cos(angle) * CACHE_SPAWN_DISTANCE;
+    const y = pT.y + Math.sin(angle) * CACHE_SPAWN_DISTANCE;
+
+    const entity = this.world.createEntity();
+    const s = CACHE_SIZE;
+    const g = new Graphics();
+    g.rect(-s, -s, s * 2, s * 2).fill(0x2a1a00);
+    g.rect(-s, -s, s * 2, s * 2).stroke({ color: CACHE_COLOR, width: 3 });
+    g.rect(-s * 0.4, -s * 0.4, s * 0.8, s * 0.8).fill(CACHE_COLOR);
+    // Glow ring
+    g.circle(0, 0, s + 6).stroke({ color: CACHE_COLOR, width: 1, alpha: 0.4 });
+    this.stage.addChild(g);
+
+    this.world.addComponent(entity, createTransform(x, y));
+    this.world.addComponent(entity, createSprite(g));
+    this.world.addComponent(entity, createCollider(s));
+    this.world.addComponent(entity, createHealth(CACHE_HP));
+    this.world.addComponent(entity, createEnemyTag());
+    this.world.addComponent(entity, createCacheTag());
+
+    // Spawn guards around the cache
+    for (let i = 0; i < 4; i++) {
+      const ga = (Math.PI * 2 / 4) * i;
+      const gx = x + Math.cos(ga) * 50;
+      const gy = y + Math.sin(ga) * 50;
+      const config = ENEMY_TYPES.basic;
+      const ge = this.world.createEntity();
+      const gg = new Graphics();
+      gg.rect(-config.size, -config.size, config.size * 2, config.size * 2).fill(this.darken(config.color, 0.25));
+      gg.rect(-config.size, -config.size, config.size * 2, config.size * 2).stroke({ color: config.color, width: 2 });
+      this.stage.addChild(gg);
+      this.world.addComponent(ge, createTransform(gx, gy));
+      this.world.addComponent(ge, createVelocity());
+      this.world.addComponent(ge, createSprite(gg));
+      this.world.addComponent(ge, createCollider(config.size));
+      this.world.addComponent(ge, createHealth(config.hp));
+      this.world.addComponent(ge, createEnemyTag());
+      this.world.addComponent(ge, createEnemyType("basic", config.speed, config.scrapDrop));
+    }
+  }
+
+  private spawnPowerCrate(crateType: "magnetite" | "overclock" | "repair", color: number): void {
+    const players = this.world.query(["PlayerTag", "Transform"]);
+    if (players.length === 0) return;
+    const pT = this.world.getComponent<Transform>(players[0], "Transform")!;
+
+    const angle = Math.random() * Math.PI * 2;
+    const dist = MAGNETITE_SPAWN_DIST * (0.8 + Math.random() * 0.4);
+    const x = pT.x + Math.cos(angle) * dist;
+    const y = pT.y + Math.sin(angle) * dist;
+
+    const entity = this.world.createEntity();
+    const s = POWER_CRATE_SIZE;
+    const g = new Graphics();
+    g.roundRect(-s, -s, s * 2, s * 2, 4).fill(0x111118);
+    g.roundRect(-s, -s, s * 2, s * 2, 4).stroke({ color, width: 2 });
+    g.circle(0, 0, s * 0.4).fill(color);
+    // Pulsing glow ring
+    g.circle(0, 0, s + 8).stroke({ color, width: 1, alpha: 0.3 });
+    this.stage.addChild(g);
+
+    this.world.addComponent(entity, createTransform(x, y));
+    this.world.addComponent(entity, createSprite(g));
+    this.world.addComponent(entity, createCollider(s));
+    this.world.addComponent(entity, createPowerCrateTag(crateType));
   }
 
   /** Spawn at viewport edges relative to player position */

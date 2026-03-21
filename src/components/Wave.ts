@@ -13,6 +13,12 @@ export interface WaveState extends Component {
   hordeCooldown: number;  // > 0 during post-horde calm (seconds remaining)
   totalKills: number;     // total enemies killed (for end screen stats)
   killsByType: Record<string, number>; // kills per enemy type name
+  bossASpawned: boolean;
+  bossBSpawned: boolean;
+  queenSpawned: boolean;
+  queenActive: boolean;   // true while queen is alive — pauses normal spawning
+  overclockTimer: number; // > 0 = all cooldowns halved
+  magnetPulseTimer: number; // > 0 = infinite attract radius
 }
 
 export function createWaveState(): WaveState {
@@ -28,5 +34,11 @@ export function createWaveState(): WaveState {
     hordeCooldown: 0,
     totalKills: 0,
     killsByType: {},
+    bossASpawned: false,
+    bossBSpawned: false,
+    queenSpawned: false,
+    queenActive: false,
+    overclockTimer: 0,
+    magnetPulseTimer: 0,
   };
 }

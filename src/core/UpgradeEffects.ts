@@ -3,6 +3,7 @@ import type { Inventory } from "../components/Inventory";
 import type { ScrapCollector } from "../components/ScrapCollector";
 import type { UpgradeChoice } from "./UpgradeManager";
 import type { Container } from "pixi.js";
+import { getGarageDamageBonus as _getGarageDamageBonus, getGarageCooldownMult as _getGarageCooldownMult } from "./GarageEffects";
 import { Graphics } from "pixi.js";
 import { createTransform } from "../components/Transform";
 import { createSprite } from "../components/Sprite";
@@ -143,11 +144,15 @@ function applyItemUpgrade(
       const shield = world.getComponent<Shield>(playerId, "Shield");
       if (shield) {
         if (rarity === "epic") {
+          shield.maxCharges += 2;
+          shield.charges += 2;
+          shield.rechargeCooldown *= 0.7;
+        } else if (rarity === "rare") {
           shield.maxCharges++;
           shield.charges++;
+          shield.rechargeCooldown *= 0.75;
         } else {
-          // Reduce recharge cooldown
-          shield.rechargeCooldown *= rarity === "rare" ? 0.7 : 0.85;
+          shield.rechargeCooldown *= 0.85;
         }
       }
       break;
@@ -158,10 +163,12 @@ function applyItemUpgrade(
       break;
 
     case "multi": {
-      // Each upgrade spawns an extra turret if player has turrets
+      // Spawn turrets based on rarity: normal=1, rare=2, epic=3
       const turretEnts = world.query(["TurretTag"]);
       if (turretEnts.length > 0) {
-        spawnTurret(world, stage, playerId);
+        for (let t = 0; t < mult; t++) {
+          spawnTurret(world, stage, playerId);
+        }
       }
       break;
     }
@@ -204,15 +211,22 @@ export function getItemLevel(world: World, itemId: string): number {
   return slot ? slot.level : 0;
 }
 
-/** Get flat bonus damage from Puissance passive */
+/** Get flat bonus damage from Puissance passive + Garage Combat Protocols */
 export function getBonusDamage(world: World): number {
-  return getItemLevel(world, "might");
+  return getItemLevel(world, "might") + _getGarageDamageBonus();
 }
 
-/** Get cooldown multiplier from Célérité passive (< 1 = faster) */
+/** Get cooldown multiplier from Célérité passive + Garage Overclock + Power Crate (< 1 = faster) */
 export function getCooldownMult(world: World): number {
   const level = getItemLevel(world, "swiftness");
-  return Math.max(0.3, 1 - level * 0.10);
+  let mult = Math.max(0.3, 1 - level * 0.10) * _getGarageCooldownMult();
+  // Overclock power crate active?
+  const managers = world.query(["WaveState"]);
+  if (managers.length > 0) {
+    const wave = world.getComponent<import("../components/Wave").WaveState>(managers[0], "WaveState");
+    if (wave && wave.overclockTimer > 0) mult *= 0.5;
+  }
+  return mult;
 }
 
 /** Get range multiplier from Portée passive (> 1 = farther) */

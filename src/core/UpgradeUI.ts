@@ -17,6 +17,7 @@ export class UpgradeUI {
   private selectedIndex = 0;
   private cleanupList: Container[] = [];
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+  private keyUpHandler: ((e: KeyboardEvent) => void) | null = null;
   private clickHandlers: Array<() => void> = [];
 
   constructor() {
@@ -49,7 +50,7 @@ export class UpgradeUI {
 
     // Draw overlay
     this.overlay.clear();
-    this.overlay.rect(0, 0, screenWidth, screenHeight).fill({ color: 0x000000, alpha: 0.6 });
+    this.overlay.clear();
 
     // Title
     const titleStyle = new TextStyle({
@@ -111,8 +112,19 @@ export class UpgradeUI {
     this.container.visible = true;
     this.updateHighlight();
 
-    // Keyboard input
+    // Keyboard input — with activation delay + no key-repeat
+    const openTime = performance.now();
+    const ACTIVATION_DELAY = 200; // ms before accepting input
+    const heldKeys = new Set<string>();
+
     this.keyHandler = (e: KeyboardEvent) => {
+      // Ignore inputs during activation delay
+      if (performance.now() - openTime < ACTIVATION_DELAY) return;
+
+      // Ignore key repeat (held down)
+      if (heldKeys.has(e.code)) return;
+      heldKeys.add(e.code);
+
       if (e.code === "KeyA" || e.code === "KeyQ" || e.code === "ArrowLeft") {
         this.selectedIndex = (this.selectedIndex - 1 + choices.length) % choices.length;
         this.updateHighlight();
@@ -123,7 +135,14 @@ export class UpgradeUI {
         this.pick(choices[this.selectedIndex]);
       }
     };
+
+    // Track key releases to allow re-pressing
+    this.keyUpHandler = (e: KeyboardEvent) => {
+      heldKeys.delete(e.code);
+    };
+
     window.addEventListener("keydown", this.keyHandler);
+    window.addEventListener("keyup", this.keyUpHandler);
   }
 
   hide(): void {
@@ -131,6 +150,10 @@ export class UpgradeUI {
     if (this.keyHandler) {
       window.removeEventListener("keydown", this.keyHandler);
       this.keyHandler = null;
+    }
+    if (this.keyUpHandler) {
+      window.removeEventListener("keyup", this.keyUpHandler);
+      this.keyUpHandler = null;
     }
     this.removeClickHandlers();
   }

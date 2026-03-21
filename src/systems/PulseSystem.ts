@@ -6,6 +6,7 @@ import { Graphics } from "pixi.js";
 import { getItemLevel, getBonusDamage, getCooldownMult, getRangeMult, getQuantityBonus } from "../core/UpgradeEffects";
 import { damageEnemy } from "../core/Combat";
 import { hasEvolution } from "../core/EvolutionManager";
+import { playPulse } from "../core/Audio";
 import {
   PULSE_COOLDOWN,
   PULSE_RADIUS,
@@ -20,6 +21,7 @@ export class PulseSystem implements System {
   private stage: Container;
   private timer = 0;
   private pendingPulses: Array<{ delay: number; radius: number; damage: number }> = [];
+  private activeRings: Array<{ g: Graphics; cx: number; cy: number; maxRadius: number; life: number; maxLife: number }> = [];
 
   constructor(world: World, stage: Container) {
     this.world = world;
@@ -27,6 +29,24 @@ export class PulseSystem implements System {
   }
 
   update(dt: number): void {
+    // Tick active pulse rings (ticker-driven, no rAF)
+    for (let i = this.activeRings.length - 1; i >= 0; i--) {
+      const ring = this.activeRings[i];
+      ring.life -= dt;
+      if (ring.life <= 0) {
+        ring.g.removeFromParent(); ring.g.destroy();
+        this.activeRings.splice(i, 1);
+      } else {
+        const t = 1 - ring.life / ring.maxLife;
+        const r = ring.maxRadius * t;
+        const w = 6 * (1 - t) + 1;
+        const alpha = 1 - t * 0.7;
+        ring.g.clear();
+        ring.g.circle(ring.cx, ring.cy, r).stroke({ color: PULSE_COLOR, width: w, alpha });
+        ring.g.circle(ring.cx, ring.cy, r * 0.9).fill({ color: PULSE_COLOR, alpha: 0.06 * (1 - t) });
+      }
+    }
+
     // Process pending delayed pulses
     for (let i = this.pendingPulses.length - 1; i >= 0; i--) {
       this.pendingPulses[i].delay -= dt;
@@ -59,12 +79,14 @@ export class PulseSystem implements System {
     if (hasEvolution(this.world, "nova")) {
       const novaRadius = radius * 2;
       const novaDamage = damage * 3;
+      playPulse();
       this.novaPulse(pT.x, pT.y, novaRadius, novaDamage);
       this.drawPulse(pT.x, pT.y, novaRadius);
       return;
     }
 
     // --- Normal pulse ---
+    playPulse();
     this.pulse(pT.x, pT.y, radius, damage);
 
     // Queue extra waves from Quantité
@@ -121,27 +143,7 @@ export class PulseSystem implements System {
   private drawPulse(cx: number, cy: number, maxRadius: number): void {
     const g = new Graphics();
     this.stage.addChild(g);
-
-    const duration = PULSE_FLASH_DURATION * 1000 * 1.5; // slightly longer for expansion
-    const start = performance.now();
-
-    const animate = () => {
-      const t = Math.min(1, (performance.now() - start) / duration);
-      if (t >= 1) {
-        g.removeFromParent();
-        g.destroy();
-        return;
-      }
-
-      const r = maxRadius * t;
-      const w = 6 * (1 - t) + 1;
-      const alpha = 1 - t * 0.7;
-
-      g.clear();
-      g.circle(cx, cy, r).stroke({ color: PULSE_COLOR, width: w, alpha });
-      g.circle(cx, cy, r * 0.9).fill({ color: PULSE_COLOR, alpha: 0.06 * (1 - t) });
-      requestAnimationFrame(animate);
-    };
-    requestAnimationFrame(animate);
+    const life = PULSE_FLASH_DURATION * 1.5;
+    this.activeRings.push({ g, cx, cy, maxRadius, life, maxLife: life });
   }
 }

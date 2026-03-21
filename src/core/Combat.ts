@@ -12,12 +12,14 @@ import { createCollider } from "../components/Collider";
 import { createScrapTag } from "../components/Scrap";
 import { createHealthPickupTag } from "../components/HealthPickup";
 import {
-  SCRAP_SIZE, SCRAP_COLOR, ENEMY_TYPES,
+  SCRAP_SIZE, ENEMY_TYPES,
   HEALTH_DROP_CHANCE, HEALTH_PICKUP_SIZE, HEALTH_PICKUP_COLOR, HEALTH_PICKUP_HEAL,
 } from "../config/constants";
 import { triggerShake } from "./ScreenShake";
-import { spawnDeathParticles, spawnKillFlash, registerKill } from "./Particles";
+import { spawnDeathParticles, spawnKillFlash, registerKill, spawnShockwave, spawnDamageNumber } from "./Particles";
 import { triggerHitStop } from "./HitStop";
+import { playKill } from "./Audio";
+import { getItemLevel } from "./UpgradeEffects";
 
 /**
  * Damage an enemy. Returns true if the enemy died.
@@ -33,21 +35,28 @@ export function damageEnemy(
   const health = world.getComponent<Health>(entity, "Health");
   if (!health) return false;
 
-  health.current -= damage;
+  // Crit chance from Overclock passive (5% per level)
+  const critLevel = getItemLevel(world, "crit");
+  const isCrit = critLevel > 0 && Math.random() < critLevel * 0.05;
+  const finalDamage = isCrit ? damage * 2 : damage;
+
+  health.current -= finalDamage;
+
+  // Floating damage number for big hits
+  if (finalDamage >= 2) {
+    const enemyType = world.getComponent<EnemyType>(entity, "EnemyType");
+    const color = enemyType ? ENEMY_TYPES[enemyType.name].color : 0xffffff;
+    spawnDamageNumber(stage, x, y - 10, finalDamage, color);
+  }
 
   if (health.current <= 0) {
     killEnemy(world, stage, entity, x, y);
     return true;
   }
 
-  // Flash feedback
-  const sprite = world.getComponent<Sprite>(entity, "Sprite");
-  if (sprite) {
-    sprite.graphic.alpha = 0.5;
-    setTimeout(() => {
-      if (world.isAlive(entity)) sprite.graphic.alpha = 1;
-    }, 80);
-  }
+  // Flash + scale-pop feedback — driven by RenderSystem
+  health.flashTimer = 0.08;
+  health.hitScale = 1.3;
   return false;
 }
 
@@ -62,7 +71,39 @@ export function killEnemy(
   const isDestructible = world.hasComponent(entity, "DestructibleTag");
   const enemyType = world.getComponent<EnemyType>(entity, "EnemyType");
 
-  if (isDestructible) {
+  const isCache = world.hasComponent(entity, "CacheTag");
+  const isBoss = world.hasComponent(entity, "BossTag");
+
+  // Clear queenActive flag when queen dies
+  if (isBoss) {
+    const bossTag = world.getComponent<{ type: string; bossType: string }>(entity, "BossTag");
+    if (bossTag?.bossType === "queen") {
+      const mgrs = world.query(["WaveState"]);
+      if (mgrs.length > 0) {
+        world.getComponent<WaveState>(mgrs[0], "WaveState")!.queenActive = false;
+      }
+    }
+  }
+
+  if (isCache) {
+    // Cache burst — lots of scrap + magnet pulse
+    spawnDeathParticles(stage, x, y, 0xb8860b, 12);
+    spawnKillFlash(stage, x, y, 22);
+    triggerShake(6, 0.15);
+    registerKill();
+    for (let i = 0; i < 15; i++) {
+      const angle = (Math.PI * 2 / 15) * i;
+      const ox = Math.cos(angle) * 30;
+      const oy = Math.sin(angle) * 30;
+      spawnScrap(world, stage, x + ox, y + oy);
+    }
+    const mgrs = world.query(["WaveState"]);
+    if (mgrs.length > 0) {
+      const wave = world.getComponent<WaveState>(mgrs[0], "WaveState")!;
+      wave.magnetPulseTimer = 2.0;
+      wave.totalKills++;
+    }
+  } else if (isDestructible) {
     // Destructible props always drop a health pickup
     spawnDeathParticles(stage, x, y, 0x7a6840, 4);
     spawnKillFlash(stage, x, y, 14);
@@ -81,8 +122,11 @@ export function killEnemy(
     if (enemyType?.name === "tank") {
       triggerShake(8, 0.15);
       triggerHitStop(0.08, 0.05);
+      spawnShockwave(stage, x, y, ENEMY_TYPES.tank.color);
+      playKill(true);
     } else {
       triggerShake(3, 0.08);
+      playKill(false);
     }
 
     // Multi-kill tracking
@@ -127,10 +171,37 @@ export function killEnemy(
 
 function spawnScrap(world: World, stage: Container, x: number, y: number): void {
   const entity = world.createEntity();
-  const graphic = new Graphics()
-    .rect(-SCRAP_SIZE, -SCRAP_SIZE, SCRAP_SIZE * 2, SCRAP_SIZE * 2)
-    .fill(SCRAP_COLOR);
-  graphic.rotation = Math.PI / 4;
+  const s = SCRAP_SIZE * (0.7 + Math.random() * 0.6); // size variation
+  const graphic = new Graphics();
+
+  // Random scrap shape — irregular metal shard
+  const variant = Math.floor(Math.random() * 3);
+  const darkFill = 0x3a3a3a;
+  const brightEdge = 0xd4a047;
+
+  switch (variant) {
+    case 0:
+      // Hexagonal bolt
+      graphic.poly([0, -s, s * 0.8, -s * 0.4, s * 0.8, s * 0.4, 0, s, -s * 0.8, s * 0.4, -s * 0.8, -s * 0.4]).fill(darkFill);
+      graphic.poly([0, -s, s * 0.8, -s * 0.4, s * 0.8, s * 0.4, 0, s, -s * 0.8, s * 0.4, -s * 0.8, -s * 0.4]).stroke({ color: brightEdge, width: 1.5 });
+      graphic.circle(0, 0, s * 0.25).fill(brightEdge);
+      break;
+    case 1:
+      // Gear fragment
+      graphic.rect(-s, -s * 0.35, s * 2, s * 0.7).fill(darkFill);
+      graphic.rect(-s * 0.35, -s, s * 0.7, s * 2).fill(darkFill);
+      graphic.rect(-s, -s * 0.35, s * 2, s * 0.7).stroke({ color: brightEdge, width: 1 });
+      graphic.rect(-s * 0.35, -s, s * 0.7, s * 2).stroke({ color: brightEdge, width: 1 });
+      graphic.circle(0, 0, s * 0.2).fill(0x555555);
+      break;
+    default:
+      // Angular shard
+      graphic.poly([-s * 0.3, -s, s * 0.6, -s * 0.6, s, s * 0.2, s * 0.2, s, -s, s * 0.4]).fill(darkFill);
+      graphic.poly([-s * 0.3, -s, s * 0.6, -s * 0.6, s, s * 0.2, s * 0.2, s, -s, s * 0.4]).stroke({ color: brightEdge, width: 1 });
+      break;
+  }
+
+  graphic.rotation = Math.random() * Math.PI * 2;
   stage.addChild(graphic);
 
   world.addComponent(entity, createTransform(x, y));

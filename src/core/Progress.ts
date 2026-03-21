@@ -18,6 +18,9 @@ export interface ProgressData {
   bestTime: number;                    // longest survival in seconds
   bestKills: number;                   // most kills in a single run
   totalRuns: number;
+  cogs: number;                        // current unspent Cogs
+  totalCogsEarned: number;             // lifetime total
+  garageUpgrades: Record<string, number>; // upgradeId → current level
 }
 
 // --- Achievements ---
@@ -64,6 +67,9 @@ function defaultData(): ProgressData {
     bestTime: 0,
     bestKills: 0,
     totalRuns: 0,
+    cogs: 0,
+    totalCogsEarned: 0,
+    garageUpgrades: {},
   };
 }
 
@@ -144,4 +150,32 @@ export function getKillCount(type: string): number {
 export function getAchievementProgress(): { unlocked: number; total: number } {
   const data = loadProgress();
   return { unlocked: data.achievements.length, total: ACHIEVEMENTS.length };
+}
+
+/** Add Cogs earned from a run */
+export function addCogs(amount: number): void {
+  const data = loadProgress();
+  data.cogs += amount;
+  data.totalCogsEarned += amount;
+  saveProgress(data);
+}
+
+/** Purchase a garage upgrade. Returns true if successful. */
+export function purchaseGarageUpgrade(upgradeId: string, cost: number): boolean {
+  const data = loadProgress();
+  if (data.cogs < cost) return false;
+  data.cogs -= cost;
+  data.garageUpgrades[upgradeId] = (data.garageUpgrades[upgradeId] ?? 0) + 1;
+  saveProgress(data);
+  return true;
+}
+
+/** Get current Cogs balance */
+export function getCogs(): number {
+  return loadProgress().cogs;
+}
+
+/** Get garage upgrade level */
+export function getGarageLevel(upgradeId: string): number {
+  return loadProgress().garageUpgrades[upgradeId] ?? 0;
 }

@@ -11,6 +11,8 @@ export class CameraSystem implements System {
   private app: Application;
   private gameContainer: Container;
   private background: TilingSprite;
+  private camX = 0;
+  private camY = 0;
 
   constructor(
     world: World,
@@ -30,8 +32,15 @@ export class CameraSystem implements System {
 
     const t = this.world.getComponent<Transform>(players[0], "Transform")!;
 
-    let cx = -t.x + this.app.screen.width / 2;
-    let cy = -t.y + this.app.screen.height / 2;
+    // Camera lerp — slight lag for weight/feel
+    const targetX = -t.x + this.app.screen.width / 2;
+    const targetY = -t.y + this.app.screen.height / 2;
+    const lerpSpeed = 8;
+    this.camX += (targetX - this.camX) * Math.min(1, lerpSpeed * dt);
+    this.camY += (targetY - this.camY) * Math.min(1, lerpSpeed * dt);
+
+    let cx = this.camX;
+    let cy = this.camY;
 
     // Screen shake
     if (screenShake.timer > 0) {
@@ -41,8 +50,13 @@ export class CameraSystem implements System {
       cx += (Math.random() - 0.5) * mag * 2;
       cy += (Math.random() - 0.5) * mag * 2;
 
+      // Background shudder on shake
+      const rumble = 1 + (mag / 100) * 0.008;
+      this.background.tileScale.set(rumble);
+
       if (screenShake.timer <= 0) {
         screenShake.intensity = 0;
+        this.background.tileScale.set(1);
       }
     }
 

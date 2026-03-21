@@ -4,8 +4,9 @@ import type { Transform } from "../components/Transform";
 import type { Sprite } from "../components/Sprite";
 import type { Health } from "../components/Health";
 import type { Shield } from "../components/Shield";
+import type { EnemyType } from "../components/EnemyType";
 import { Graphics } from "pixi.js";
-import { PLAYER_SIZE } from "../config/constants";
+import { PLAYER_SIZE, ENEMY_TYPES } from "../config/constants";
 
 const SHIELD_COLOR = 0x5dade2;
 const SHIELD_BASE_RADIUS = PLAYER_SIZE + 14;
@@ -17,6 +18,9 @@ export class RenderSystem implements System {
   private elapsed = 0;
   private healthBar: Graphics | null = null;
   private shieldGraphic: Graphics | null = null;
+  private playerCoreGlow: Graphics | null = null;
+  private dangerVignette: Graphics | null = null;
+  private enemyHpBar: Graphics | null = null;
 
   constructor(world: World) {
     this.world = world;
@@ -49,8 +53,37 @@ export class RenderSystem implements System {
       }
     }
 
+    // Process hit-flash + scale-pop on enemies
+    const healthEntities = this.world.query(["Health", "Sprite"]);
+    for (const entity of healthEntities) {
+      const health = this.world.getComponent<Health>(entity, "Health")!;
+      const sprite = this.world.getComponent<Sprite>(entity, "Sprite")!;
+
+      // Flash alpha
+      if (health.flashTimer > 0) {
+        health.flashTimer -= dt;
+        sprite.graphic.alpha = health.flashTimer > 0 ? 0.5 : 1;
+      }
+
+      // Spawn-in scale pop (0 → 1 with overshoot)
+      if (health.spawnScale < 1.0) {
+        health.spawnScale = Math.min(1.0, health.spawnScale + dt * 5.5);
+        const s = health.spawnScale < 0.8
+          ? health.spawnScale / 0.8
+          : 1.0 + Math.sin((health.spawnScale - 0.8) / 0.2 * Math.PI) * 0.15;
+        sprite.graphic.scale.set(health.hitScale > 1.0 ? health.hitScale : s);
+      } else if (health.hitScale > 1.0) {
+        // Scale-pop spring-back on hit
+        health.hitScale = Math.max(1.0, health.hitScale - dt * 14);
+        sprite.graphic.scale.set(health.hitScale);
+      }
+    }
+
     this.drawPlayerHealthBar();
     this.drawShieldLayers();
+    this.drawPlayerCoreGlow();
+    this.drawDangerVignette();
+    this.drawEnemyHpBars();
   }
 
   private drawPlayerHealthBar(): void {
@@ -145,6 +178,117 @@ export class RenderSystem implements System {
             .arc(cx, cy, radius, startAngle, endAngle)
             .stroke({ color: SHIELD_COLOR, width: 1, alpha: 0.12 });
         }
+      }
+    }
+  }
+
+  /** Player core dot changes color by HP: gold → amber → red + flicker */
+  private drawPlayerCoreGlow(): void {
+    const players = this.world.query(["PlayerTag", "Transform", "Health", "Sprite"]);
+    if (players.length === 0) return;
+
+    const transform = this.world.getComponent<Transform>(players[0], "Transform")!;
+    const health = this.world.getComponent<Health>(players[0], "Health")!;
+    const sprite = this.world.getComponent<Sprite>(players[0], "Sprite")!;
+
+    if (!this.playerCoreGlow) {
+      this.playerCoreGlow = new Graphics();
+      if (sprite.graphic.parent) sprite.graphic.parent.addChild(this.playerCoreGlow);
+    }
+
+    const ratio = health.current / health.max;
+    const flicker = ratio < 0.25 ? Math.sin(this.elapsed * 28) * 0.35 : 0;
+    const t = 1 - ratio;
+
+    const r = Math.round(0xf5 + (0xcc - 0xf5) * t);
+    const g = Math.round(0xc8 * (1 - t * 0.85));
+    const b = Math.round(0x42 * (1 - t));
+    const coreColor = (r << 16) | (g << 8) | b;
+    const coreRadius = PLAYER_SIZE * 0.35 * (1 + flicker * 0.15);
+
+    this.playerCoreGlow.clear();
+    this.playerCoreGlow.circle(transform.x, transform.y, coreRadius + 4)
+      .fill({ color: coreColor, alpha: 0.25 + flicker * 0.1 });
+    this.playerCoreGlow.circle(transform.x, transform.y, coreRadius)
+      .fill({ color: coreColor, alpha: 1 });
+  }
+
+  /** Red pulsing vignette at screen edges when HP is low */
+  private drawDangerVignette(): void {
+    const players = this.world.query(["PlayerTag", "Health"]);
+    if (players.length === 0) return;
+
+    const health = this.world.getComponent<Health>(players[0], "Health")!;
+    const ratio = health.current / health.max;
+
+    if (ratio >= 0.4) {
+      if (this.dangerVignette) this.dangerVignette.visible = false;
+      return;
+    }
+
+    if (!this.dangerVignette) {
+      this.dangerVignette = new Graphics();
+      this.dangerVignette.zIndex = 900;
+      // Add to app.stage (fixed layer, above gameContainer)
+      const sprite = this.world.getComponent<Sprite>(players[0], "Sprite");
+      const root = sprite?.graphic.parent?.parent;
+      if (root) root.addChild(this.dangerVignette);
+    }
+    this.dangerVignette.visible = true;
+
+    const danger = 1 - ratio / 0.4;
+    const pulse = 0.5 + Math.sin(this.elapsed * (3 + danger * 10)) * 0.5;
+    const alpha = pulse * danger * 0.4;
+    const color = ratio < 0.2 ? 0x8b0000 : 0xc0392b;
+
+    this.dangerVignette.clear();
+    // Four edge bleed rects
+    this.dangerVignette.rect(0, 0, 9999, 80).fill({ color, alpha: alpha * 0.8 });
+    this.dangerVignette.rect(0, 9999 - 80, 9999, 80).fill({ color, alpha: alpha * 0.8 });
+    this.dangerVignette.rect(0, 0, 100, 9999).fill({ color, alpha: alpha * 0.5 });
+    this.dangerVignette.rect(9999 - 100, 0, 100, 9999).fill({ color, alpha: alpha * 0.5 });
+  }
+
+  /** Draw small HP bars above damaged enemies using a single reusable Graphics */
+  private drawEnemyHpBars(): void {
+    const enemies = this.world.query(["EnemyTag", "Health", "Transform", "Sprite"]);
+
+    if (!this.enemyHpBar) {
+      this.enemyHpBar = new Graphics();
+      this.enemyHpBar.zIndex = 800;
+    }
+
+    // Ensure it's parented to the game container
+    if (!this.enemyHpBar.parent) {
+      // Find game container from any enemy sprite
+      if (enemies.length > 0) {
+        const sprite = this.world.getComponent<Sprite>(enemies[0], "Sprite");
+        if (sprite?.graphic.parent) {
+          sprite.graphic.parent.addChild(this.enemyHpBar);
+        }
+      }
+    }
+
+    this.enemyHpBar.clear();
+
+    for (const entity of enemies) {
+      const health = this.world.getComponent<Health>(entity, "Health")!;
+      // Only show bar when damaged and multi-HP enemy
+      if (health.current >= health.max || health.max <= 1) continue;
+
+      const transform = this.world.getComponent<Transform>(entity, "Transform")!;
+      const enemyType = this.world.getComponent<EnemyType>(entity, "EnemyType");
+      const size = enemyType ? ENEMY_TYPES[enemyType.name].size : 16;
+
+      const barW = size * 2;
+      const barH = 2;
+      const barX = transform.x - barW / 2;
+      const barY = transform.y - size - 6;
+      const ratio = Math.max(0, health.current / health.max);
+
+      this.enemyHpBar.rect(barX, barY, barW, barH).fill({ color: 0x111111, alpha: 0.7 });
+      if (ratio > 0) {
+        this.enemyHpBar.rect(barX, barY, barW * ratio, barH).fill(0xe74c3c);
       }
     }
   }

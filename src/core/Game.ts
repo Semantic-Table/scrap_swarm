@@ -7,9 +7,19 @@ import { applyUpgrade } from "./UpgradeEffects";
 import { recordRun } from "./Progress";
 import { CodexUI } from "./CodexUI";
 import { DebugUI } from "./DebugUI";
+import { GarageUI } from "./GarageUI";
+import { calculateCogs } from "../config/garageUpgrades";
+import { addCogs } from "./Progress";
+import {
+  getGarageHpBonus, getGarageStartingWeapons,
+  getGarageShieldGen, getGarageExtraChoice,
+  getGarageVeteranCore,
+} from "./GarageEffects";
+import { createShield } from "../components/Shield";
 
 // Components
 import { createTransform } from "../components/Transform";
+import type { Transform } from "../components/Transform";
 import { createVelocity } from "../components/Velocity";
 import { createSprite } from "../components/Sprite";
 import { createCollider } from "../components/Collider";
@@ -24,6 +34,7 @@ import type { PlayerLevel } from "../components/PlayerLevel";
 import type { Sprite } from "../components/Sprite";
 import type { WaveState } from "../components/Wave";
 import type { Inventory } from "../components/Inventory";
+import type { BossTag } from "../components/MapObject";
 
 // Systems
 import { InputSystem } from "../systems/InputSystem";
@@ -45,11 +56,23 @@ import { PulseSystem } from "../systems/PulseSystem";
 import { CleanupSystem } from "../systems/CleanupSystem";
 import { SwordSystem } from "../systems/SwordSystem";
 import { EnemyShootSystem } from "../systems/EnemyShootSystem";
+import { BoomerangSystem } from "../systems/BoomerangSystem";
+import { MineSystem } from "../systems/MineSystem";
+import { LaserSystem } from "../systems/LaserSystem";
+import { AuraSystem } from "../systems/AuraSystem";
+import { RicochetSystem } from "../systems/RicochetSystem";
+import { GravityWellSystem } from "../systems/GravityWellSystem";
+import { ChainSawSystem } from "../systems/ChainSawSystem";
+import { SentrySystem } from "../systems/SentrySystem";
 import { HudSystem } from "../systems/HudSystem";
+import { BossSystem } from "../systems/BossSystem";
 import { CameraSystem } from "../systems/CameraSystem";
 
 // Config
 import { hitStop } from "./HitStop";
+import { screenShake } from "./ScreenShake";
+import { initAudio, disposeAudio, suspendAudio, resumeAudio, playLevelUp, playEvolution, playGameOver, playVictory } from "./Audio";
+import { spawnEvolutionBurst, updateParticles, clearParticles } from "./Particles";
 import { createHealth } from "../components/Health";
 import {
   PLAYER_SIZE,
@@ -73,6 +96,7 @@ export class Game {
   private upgradeUI: UpgradeUI;
   private codexUI: CodexUI;
   private debugUI: DebugUI;
+  private garageUI: GarageUI;
   private running = false;
   private paused = false;
 
@@ -85,6 +109,7 @@ export class Game {
     this.upgradeUI = new UpgradeUI();
     this.codexUI = new CodexUI();
     this.debugUI = new DebugUI();
+    this.garageUI = new GarageUI();
   }
 
   async start(): Promise<void> {
@@ -100,12 +125,24 @@ export class Game {
     const loading = document.getElementById("loading");
     if (loading) loading.remove();
 
+    // Unlock AudioContext on first user gesture — required by all browsers.
+    // A one-shot handler covers both keyboard and touch/pointer paths.
+    const unlockAudio = () => {
+      void initAudio();
+      window.removeEventListener("keydown", unlockAudio);
+      window.removeEventListener("pointerdown", unlockAudio);
+    };
+    window.addEventListener("keydown", unlockAudio);
+    window.addEventListener("pointerdown", unlockAudio);
+
     // Pause when tab is hidden
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
         this.app.ticker.stop();
+        suspendAudio();
       } else {
         this.app.ticker.start();
+        resumeAudio();
       }
     });
 
@@ -142,143 +179,319 @@ export class Game {
       }
       // Cap dt to avoid teleportation after tab switch
       const dt = Math.min((ticker.deltaTime / 60) * hitStop.scale, 0.1);
-      // Animate player ring
+      // Animate player ring + body breathe
+      this.breatheTimer += dt;
       if (this.playerRing) {
         this.playerRing.rotation += dt * 1.5;
       }
+      if (this.playerBody) {
+        const breathe = 1 + Math.sin(this.breatheTimer * 2.5) * 0.03;
+        this.playerBody.scale.set(breathe);
+      }
       this.world.update(dt);
+      updateParticles(dt);
+      this.updateTutorial(dt);
       this.checkVictory();
     });
 
-    this.showTitleScreen();
-  }
-
-  private showTitleScreen(): void {
+    // Game starts immediately — overlay on top
     this.createBackground();
     this.app.stage.addChild(this.background);
+    this.beginGame();
+    this.showTitleOverlay();
+  }
 
-    const cx = this.app.screen.width / 2;
-    const cy = this.app.screen.height / 2;
+  /**
+   * Semi-transparent overlay on top of the running game.
+   * Auto-dismisses after 3s or on tap/Enter. Fades out smoothly.
+   */
+  private showTitleOverlay(): void {
+    const sw = this.app.screen.width;
+    const sh = this.app.screen.height;
+    const cx = sw / 2;
+    const cy = sh / 2;
 
-    const titleContainer = new Container();
-    this.app.stage.addChild(titleContainer);
+    // Pause gameplay during overlay
+    this.paused = true;
 
-    // Title
+    const overlay = new Container();
+    this.app.stage.addChild(overlay);
+
+    // Dim scrim
+    const scrim = new Graphics();
+    scrim.rect(0, 0, sw, sh).fill({ color: 0x0a0a15, alpha: 0.7 });
+    overlay.addChild(scrim);
+
+    // Animated logo — player octagon + rotating ring
+    const logoSize = 32;
+    const logoContainer = new Container();
+    logoContainer.x = cx;
+    logoContainer.y = cy - 100;
+    overlay.addChild(logoContainer);
+
+    const logoBody = new Graphics();
+    const pts: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      const a = (Math.PI * 2 / 8) * i - Math.PI / 8;
+      pts.push(Math.cos(a) * logoSize, Math.sin(a) * logoSize);
+    }
+    logoBody.poly(pts).fill(0x3d2a0a);
+    logoBody.poly(pts).stroke({ color: 0xd4a047, width: 2 });
+    logoBody.circle(0, 0, logoSize * 0.35).fill(0xf5c842);
+    logoContainer.addChild(logoBody);
+
+    const logoRing = new Graphics();
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI * 2 / 6) * i;
+      logoRing.arc(0, 0, logoSize + 10, a + 0.1, a + 0.45);
+    }
+    logoRing.stroke({ color: 0xd4a047, width: 2, alpha: 0.6 });
+    logoContainer.addChild(logoRing);
+
+    // Title text
     const title = new Text({
       text: "SCRAP SWARM",
       style: new TextStyle({
         fontFamily: "monospace",
-        fontSize: 56,
+        fontSize: 48,
         fontWeight: "bold",
         fill: 0xd4a047,
-        letterSpacing: 4,
+        letterSpacing: 6,
       }),
     });
     title.anchor.set(0.5);
     title.x = cx;
-    title.y = cy - 60;
-    titleContainer.addChild(title);
+    title.y = cy - 30;
+    overlay.addChild(title);
 
     // Subtitle
     const sub = new Text({
-      text: "Survive. Scrap. Build.",
-      style: new TextStyle({
-        fontFamily: "monospace",
-        fontSize: 20,
-        fill: 0x8c8c8c,
-      }),
+      text: "Survive 10 minutes.",
+      style: new TextStyle({ fontFamily: "monospace", fontSize: 16, fill: 0x888888 }),
     });
     sub.anchor.set(0.5);
     sub.x = cx;
-    sub.y = cy;
-    titleContainer.addChild(sub);
+    sub.y = cy + 14;
+    overlay.addChild(sub);
+
+    // Best score (if exists)
+    const best = this.loadBestScore();
+    if (best) {
+      const bestText = new Text({
+        text: `Best: ${this.formatTime(best.time)}  |  ${best.kills} kills  |  Lv. ${best.level}`,
+        style: new TextStyle({ fontFamily: "monospace", fontSize: 13, fill: 0x555566 }),
+      });
+      bestText.anchor.set(0.5);
+      bestText.x = cx;
+      bestText.y = cy + 38;
+      overlay.addChild(bestText);
+    }
 
     // Start prompt
     const prompt = new Text({
-      text: this.input.isMobile ? "[ TAP TO START ]" : "[ ENTER ]",
+      text: this.input.isMobile ? "TAP ANYWHERE TO START" : "PRESS ENTER TO START",
       style: new TextStyle({
         fontFamily: "monospace",
-        fontSize: 24,
+        fontSize: 20,
         fontWeight: "bold",
-        fill: 0xf0f0f0,
+        fill: 0xe0e0e0,
       }),
     });
     prompt.anchor.set(0.5);
     prompt.x = cx;
-    prompt.y = cy + 60;
-    titleContainer.addChild(prompt);
+    prompt.y = cy + 80;
+    overlay.addChild(prompt);
 
-    // Codex button
-    const codexBtn = new Text({
-      text: "[ CODEX ]",
-      style: new TextStyle({
-        fontFamily: "monospace",
-        fontSize: 18,
-        fill: 0x888888,
-      }),
+    // Codex + Garage pill buttons side by side
+    const codexPill = new Container();
+    codexPill.x = cx - 130;
+    codexPill.y = cy + 130;
+    const pillBg = new Graphics();
+    pillBg.roundRect(0, 0, 120, 36, 12).fill({ color: 0x22223a });
+    pillBg.roundRect(0, 0, 120, 36, 12).stroke({ color: 0x3a3a5a, width: 1.5 });
+    codexPill.addChild(pillBg);
+    const pillText = new Text({
+      text: "CODEX",
+      style: new TextStyle({ fontFamily: "monospace", fontSize: 15, fontWeight: "bold", fill: 0x888888 }),
     });
-    codexBtn.anchor.set(0.5);
-    codexBtn.x = cx;
-    codexBtn.y = cy + 110;
-    codexBtn.eventMode = "static";
-    codexBtn.cursor = "pointer";
-    codexBtn.on("pointerover", () => { codexBtn.style.fill = 0xd4a047; });
-    codexBtn.on("pointerout", () => { codexBtn.style.fill = 0x888888; });
-    codexBtn.on("pointertap", () => {
+    pillText.anchor.set(0.5);
+    pillText.x = 60;
+    pillText.y = 18;
+    codexPill.addChild(pillText);
+    codexPill.eventMode = "static";
+    codexPill.cursor = "pointer";
+    codexPill.on("pointerover", () => {
+      pillBg.clear();
+      pillBg.roundRect(0, 0, 120, 36, 12).fill({ color: 0x2a2a4a });
+      pillBg.roundRect(0, 0, 120, 36, 12).stroke({ color: 0xd4a047, width: 1.5 });
+      pillText.style.fill = 0xd4a047;
+    });
+    codexPill.on("pointerout", () => {
+      pillBg.clear();
+      pillBg.roundRect(0, 0, 120, 36, 12).fill({ color: 0x22223a });
+      pillBg.roundRect(0, 0, 120, 36, 12).stroke({ color: 0x3a3a5a, width: 1.5 });
+      pillText.style.fill = 0x888888;
+    });
+    codexPill.on("pointertap", () => {
       this.app.stage.addChild(this.codexUI.container);
-      this.codexUI.show(this.app.screen.width, this.app.screen.height, () => {
-        // Codex closed — nothing to do, title screen is still there
-      });
+      this.codexUI.show(sw, sh, () => { /* codex closed */ });
     });
-    titleContainer.addChild(codexBtn);
+    overlay.addChild(codexPill);
 
-    // Blink the prompt
-    let blinkTimer = 0;
-    const blinkFn = (ticker: { deltaTime: number }) => {
-      blinkTimer += ticker.deltaTime / 60;
-      prompt.alpha = Math.sin(blinkTimer * 3) * 0.4 + 0.6;
-    };
-    this.app.ticker.add(blinkFn);
+    // Garage pill button
+    const garagePill = new Container();
+    garagePill.x = cx + 10;
+    garagePill.y = cy + 130;
+    const gPillBg = new Graphics();
+    gPillBg.roundRect(0, 0, 120, 36, 12).fill({ color: 0x22223a });
+    gPillBg.roundRect(0, 0, 120, 36, 12).stroke({ color: 0x3a3a5a, width: 1.5 });
+    garagePill.addChild(gPillBg);
+    const gPillText = new Text({
+      text: "GARAGE",
+      style: new TextStyle({ fontFamily: "monospace", fontSize: 15, fontWeight: "bold", fill: 0x888888 }),
+    });
+    gPillText.anchor.set(0.5);
+    gPillText.x = 60;
+    gPillText.y = 18;
+    garagePill.addChild(gPillText);
+    garagePill.eventMode = "static";
+    garagePill.cursor = "pointer";
+    garagePill.on("pointerover", () => {
+      gPillBg.clear();
+      gPillBg.roundRect(0, 0, 120, 36, 12).fill({ color: 0x2a2a4a });
+      gPillBg.roundRect(0, 0, 120, 36, 12).stroke({ color: 0xf1c40f, width: 1.5 });
+      gPillText.style.fill = 0xf1c40f;
+    });
+    garagePill.on("pointerout", () => {
+      gPillBg.clear();
+      gPillBg.roundRect(0, 0, 120, 36, 12).fill({ color: 0x22223a });
+      gPillBg.roundRect(0, 0, 120, 36, 12).stroke({ color: 0x3a3a5a, width: 1.5 });
+      gPillText.style.fill = 0x888888;
+    });
+    garagePill.on("pointertap", () => {
+      this.app.stage.addChild(this.garageUI.container);
+      this.garageUI.show(sw, sh, 0, 0, 0, 0, () => { /* garage closed */ });
+    });
+    overlay.addChild(garagePill);
 
-    let started = false;
-    const doStart = () => {
-      if (started || this.codexUI.container.visible) return;
-      started = true;
+    // --- Animations + auto-dismiss ---
+    let elapsed = 0;
+    let dismissing = false;
+    let dismissed = false;
+
+    const dismiss = () => {
+      if (dismissing || dismissed || this.codexUI.container.visible || this.garageUI.container.visible) return;
+      dismissing = true;
       window.removeEventListener("keydown", onKey);
-      this.app.ticker.remove(blinkFn);
-      titleContainer.destroy({ children: true });
-      this.beginGame();
     };
 
+    const tickFn = (ticker: { deltaTime: number }) => {
+      const dt = ticker.deltaTime / 60;
+      elapsed += dt;
+
+      // Rotate logo ring
+      logoRing.rotation += dt * 2;
+
+      // Blink prompt
+      prompt.alpha = Math.sin(elapsed * 3) * 0.4 + 0.6;
+
+      // Auto-dismiss after 3 seconds
+      if (elapsed >= 3 && !dismissing && !this.codexUI.container.visible && !this.garageUI.container.visible) {
+        dismiss();
+      }
+
+      // Fade out
+      if (dismissing) {
+        overlay.alpha -= dt * 2.5; // ~0.4s fade
+        if (overlay.alpha <= 0) {
+          dismissed = true;
+          this.app.ticker.remove(tickFn);
+          overlay.destroy({ children: true });
+          this.paused = false;
+        }
+      }
+    };
+    this.app.ticker.add(tickFn);
+
+    // Input handlers
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === "Enter" || e.code === "Space") doStart();
+      if (e.code === "Enter" || e.code === "Space") dismiss();
     };
     window.addEventListener("keydown", onKey);
 
-    // Start button — only the prompt area, not the whole screen
-    prompt.eventMode = "static";
-    prompt.cursor = "pointer";
-    prompt.on("pointertap", () => doStart());
-
-    // Also allow tap on the title/subtitle area (but not codex button)
+    // Tap anywhere (except codex button) to dismiss
+    scrim.eventMode = "static";
+    scrim.on("pointertap", () => dismiss());
     title.eventMode = "static";
-    title.cursor = "pointer";
-    title.on("pointertap", () => doStart());
-    sub.eventMode = "static";
-    sub.cursor = "pointer";
-    sub.on("pointertap", () => doStart());
+    title.on("pointertap", () => dismiss());
+    prompt.eventMode = "static";
+    prompt.on("pointertap", () => dismiss());
   }
+
+  private tutorialShown = false;
 
   private beginGame(): void {
     this.app.stage.addChild(this.gameContainer);
 
     this.createPlayer();
     this.createWaveManager();
+
+    // Veteran Core: silently apply one random normal-rarity upgrade at start
+    if (getGarageVeteranCore()) {
+      const players = this.world.query(["PlayerTag", "Inventory"]);
+      if (players.length > 0) {
+        const inv = this.world.getComponent<import("../components/Inventory").Inventory>(players[0], "Inventory")!;
+        const choices = generateChoices(inv.slots, 999, 1); // level 999 to skip first-level-up curated
+        const normalChoice = choices.find((c) => c.rarity === "normal") ?? choices[0];
+        if (normalChoice) {
+          normalChoice.rarity = "normal";
+          applyUpgrade(normalChoice, this.world, this.gameContainer);
+        }
+      }
+    }
+
     this.registerSystems();
     this.running = true;
 
     this.app.stage.addChild(this.hudLayer);
     this.app.stage.addChild(this.upgradeUI.container);
+
+    // Contextual tutorial on first run
+    if (!this.tutorialShown) {
+      this.tutorialShown = true;
+      this.scheduleTutorial();
+    }
+  }
+
+  private tutorialTimers: Array<{ delay: number; text: string }> = [
+    { delay: 1.0, text: "WASD to move" },
+    { delay: 4.0, text: "Attacks are automatic" },
+    { delay: 8.0, text: "Collect scrap to level up" },
+  ];
+  private tutorialElapsed = 0;
+  private tutorialActive = false;
+
+  private scheduleTutorial(): void {
+    this.tutorialElapsed = 0;
+    this.tutorialActive = true;
+  }
+
+  private updateTutorial(dt: number): void {
+    if (!this.tutorialActive) return;
+    this.tutorialElapsed += dt;
+
+    for (let i = this.tutorialTimers.length - 1; i >= 0; i--) {
+      if (this.tutorialElapsed >= this.tutorialTimers[i].delay) {
+        const msg = this.tutorialTimers.splice(i, 1)[0];
+        if (this.hudSystem) {
+          this.hudSystem.showAnnouncement(msg.text, this.app.screen.width, this.app.screen.height);
+        }
+      }
+    }
+
+    if (this.tutorialTimers.length === 0) {
+      this.tutorialActive = false;
+    }
   }
 
   private createBackground(): void {
@@ -304,6 +517,8 @@ export class Game {
   }
 
   private playerRing: Graphics | null = null;
+  private playerBody: Graphics | null = null;
+  private breatheTimer = 0;
 
   private createPlayer(): void {
     const entity = this.world.createEntity();
@@ -321,6 +536,9 @@ export class Game {
     body.poly(pts).stroke({ color: PLAYER_COLOR, width: 2 });
     // Inner core glow
     body.circle(0, 0, s * 0.35).fill(0xf5c842);
+    // Directional arrow on the edge
+    body.poly([s + 4, 0, s - 4, -5, s - 4, 5]).fill(0xf5c842);
+    this.playerBody = body;
 
     // Rotating ring segments
     this.playerRing = new Graphics();
@@ -345,13 +563,25 @@ export class Game {
     this.world.addComponent(entity, createSprite(graphic));
     this.world.addComponent(entity, createCollider(PLAYER_SIZE));
     this.world.addComponent(entity, createPlayerTag());
-    this.world.addComponent(entity, createHealth(PLAYER_HP));
+    // Apply garage permanent bonuses
+    this.world.addComponent(entity, createHealth(PLAYER_HP + getGarageHpBonus()));
     this.world.addComponent(entity, createScrapCollector(SCRAP_PICKUP_RADIUS));
     const inventory = createInventory();
     inventory.slots.push({ itemId: "sword", level: 1 });
+    // Starting weapons from garage protocols
+    for (const weaponId of getGarageStartingWeapons()) {
+      if (!inventory.slots.find((s) => s.itemId === weaponId)) {
+        inventory.slots.push({ itemId: weaponId, level: 1 });
+      }
+    }
     this.world.addComponent(entity, inventory);
     this.world.addComponent(entity, createPlayerLevel());
     this.world.addComponent(entity, createEvolutionState());
+
+    // Shield Generator: free shield at start
+    if (getGarageShieldGen()) {
+      this.world.addComponent(entity, createShield(1, 15));
+    }
   }
 
   private createWaveManager(): void {
@@ -390,8 +620,17 @@ export class Game {
     this.world.addSystem(new TurretShootSystem(this.world, gc));
     this.world.addSystem(new TeslaSystem(this.world, gc));
     this.world.addSystem(new PulseSystem(this.world, gc));
+    this.world.addSystem(new BoomerangSystem(this.world, gc));
+    this.world.addSystem(new MineSystem(this.world, gc));
+    this.world.addSystem(new LaserSystem(this.world, gc));
+    this.world.addSystem(new AuraSystem(this.world, gc));
+    this.world.addSystem(new RicochetSystem(this.world, gc, this.app.screen.width, this.app.screen.height));
+    this.world.addSystem(new GravityWellSystem(this.world, gc));
+    this.world.addSystem(new ChainSawSystem(this.world, gc));
+    this.world.addSystem(new SentrySystem(this.world, gc));
     this.world.addSystem(new EnemyAISystem(this.world));
     this.world.addSystem(new EnemyShootSystem(this.world, gc));
+    this.world.addSystem(new BossSystem(this.world, gc));
     this.world.addSystem(new MovementSystem(this.world));
     this.world.addSystem(new OrbitSystem(this.world));
     this.world.addSystem(new ProjectileHitSystem(this.world, gc));
@@ -412,10 +651,12 @@ export class Game {
     if (players.length === 0) return;
 
     const inventory = this.world.getComponent<Inventory>(players[0], "Inventory")!;
-    const choices = generateChoices(inventory.slots, level);
+    const choiceCount = getGarageExtraChoice() ? 4 : 3;
+    const choices = generateChoices(inventory.slots, level, choiceCount);
 
     if (choices.length === 0) return;
 
+    playLevelUp();
     this.paused = true;
 
     this.upgradeUI.show(
@@ -428,11 +669,18 @@ export class Game {
         // Check for weapon evolutions after applying upgrade
         const evo = checkEvolutions(this.world);
         if (evo && this.hudSystem) {
+          playEvolution();
           this.hudSystem.showAnnouncement(
             `EVOLUTION: ${evo.name}!`,
             this.app.screen.width,
             this.app.screen.height,
           );
+          // Burst particles at player position
+          const evoPlayers = this.world.query(["PlayerTag", "Transform"]);
+          if (evoPlayers.length > 0) {
+            const pt = this.world.getComponent<Transform>(evoPlayers[0], "Transform")!;
+            spawnEvolutionBurst(this.gameContainer, pt.x, pt.y, evo.color);
+          }
         }
 
         this.paused = false;
@@ -464,11 +712,13 @@ export class Game {
 
   private victory(elapsed: number): void {
     this.running = false;
+    playVictory();
     this.showEndScreen("VICTORY", 0x2ecc71, elapsed);
   }
 
   private gameOver(): void {
     this.running = false;
+    playGameOver();
     this.showEndScreen("GAME OVER", 0xf0f0f0, this.getElapsed());
   }
 
@@ -516,6 +766,15 @@ export class Game {
     // Record progress + check achievements
     const newAchievements = recordRun(elapsed, killsByType, discoveredItems, discoveredEvolutions);
 
+    // Calculate and save Cogs
+    const isVictory = elapsed >= FLOW_TARGET_TIME;
+    // Luck passive boosts cog earnings
+    const luckLevel = invPlayers.length > 0
+      ? (this.world.getComponent<Inventory>(invPlayers[0], "Inventory")!.slots.find((s) => s.itemId === "luck")?.level ?? 0)
+      : 0;
+    const cogsEarned = calculateCogs(elapsed, totalKills, playerLevel, isVictory, luckLevel);
+    addCogs(cogsEarned);
+
     // Save best score
     this.saveBestScore(elapsed, totalKills, playerLevel);
     const best = this.loadBestScore();
@@ -553,6 +812,30 @@ export class Game {
     stats.y = cy - 10;
     this.app.stage.addChild(stats);
 
+    // Queen status message
+    let queenYOffset = 0;
+    if (waveState && waveState.queenSpawned) {
+      const queenBosses = this.world.query(["BossTag"]);
+      let queenAlive = false;
+      for (const be of queenBosses) {
+        const bt = this.world.getComponent<BossTag>(be, "BossTag");
+        if (bt && bt.bossType === "queen") { queenAlive = true; break; }
+      }
+      const queenMsg = queenAlive
+        ? "The Swarm Queen survived..."
+        : "The Swarm Queen has fallen!";
+      const queenColor = queenAlive ? 0xe74c3c : 0x2ecc71;
+      const queenText = new Text({
+        text: queenMsg,
+        style: new TextStyle({ fontFamily: "monospace", fontSize: 16, fontWeight: "bold", fill: queenColor }),
+      });
+      queenText.anchor.set(0.5);
+      queenText.x = cx;
+      queenText.y = cy + 14;
+      this.app.stage.addChild(queenText);
+      queenYOffset = 22;
+    }
+
     // Best score
     if (best) {
       const bestStyle = new TextStyle({
@@ -566,7 +849,7 @@ export class Game {
       });
       bestText.anchor.set(0.5);
       bestText.x = cx;
-      bestText.y = cy + 16;
+      bestText.y = cy + 16 + queenYOffset;
       this.app.stage.addChild(bestText);
     }
 
@@ -584,7 +867,7 @@ export class Game {
       });
       achText.anchor.set(0.5);
       achText.x = cx;
-      achText.y = cy + 40;
+      achText.y = cy + 40 + queenYOffset;
       this.app.stage.addChild(achText);
     }
 
@@ -594,30 +877,60 @@ export class Game {
       fill: 0x888888,
     });
 
+    // Cogs earned display
+    const cogsStyle = new TextStyle({
+      fontFamily: "monospace",
+      fontSize: 18,
+      fontWeight: "bold",
+      fill: 0xf1c40f,
+    });
+    const cogsText = new Text({
+      text: `+ ${cogsEarned} Cogs`,
+      style: cogsStyle,
+    });
+    cogsText.anchor.set(0.5);
+    cogsText.x = cx;
+    cogsText.y = cy + 60 + queenYOffset;
+    this.app.stage.addChild(cogsText);
+
     const sub = new Text({
-      text: this.input.isMobile ? "Tap to play again" : "R to play again",
+      text: this.input.isMobile ? "Tap to continue" : "Press any key",
       style: subStyle,
     });
     sub.anchor.set(0.5);
     sub.x = this.app.screen.width / 2;
-    sub.y = this.app.screen.height / 2 + 80;
+    sub.y = this.app.screen.height / 2 + 90 + queenYOffset;
     this.app.stage.addChild(sub);
 
-    let restarted = false;
-    const doRestart = () => {
-      if (restarted) return;
-      restarted = true;
+    // Continue → open Garage
+    let continued = false;
+    const onTap = () => doContinue();
+    const tapTimeout = setTimeout(() => window.addEventListener("pointerdown", onTap), 500);
+    const doContinue = () => {
+      if (continued) return;
+      continued = true;
+      clearTimeout(tapTimeout);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pointerdown", onTap);
-      this.restart();
+      this.showGarage(cogsEarned, elapsed, totalKills, playerLevel);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === "KeyR" || e.code === "Space" || e.code === "Enter") doRestart();
+      if (e.code === "KeyR" || e.code === "Space" || e.code === "Enter") doContinue();
     };
-    // Delay tap listener slightly to avoid accidental restart
-    const onTap = () => doRestart();
     window.addEventListener("keydown", onKey);
-    setTimeout(() => window.addEventListener("pointerdown", onTap), 500);
+  }
+
+  private showGarage(cogsEarned: number, runTime: number, runKills: number, runLevel: number): void {
+    this.app.stage.addChild(this.garageUI.container);
+    this.garageUI.show(
+      this.app.screen.width,
+      this.app.screen.height,
+      cogsEarned,
+      runTime,
+      runKills,
+      runLevel,
+      () => { this.restart(); },
+    );
   }
 
   private saveBestScore(time: number, kills: number, level: number): void {
@@ -655,8 +968,26 @@ export class Game {
     this.upgradeUI = new UpgradeUI();
     this.codexUI = new CodexUI();
     this.debugUI = new DebugUI();
+    this.garageUI = new GarageUI();
     this.paused = false;
     this.running = false;
+    this.playerRing = null;
+    this.playerBody = null;
+    this.breatheTimer = 0;
+
+    // Reset singleton state
+    hitStop.timer = 0;
+    hitStop.scale = 1.0;
+    screenShake.timer = 0;
+    screenShake.intensity = 0;
+    screenShake.duration = 0;
+
+    // Clear particle pool before destroying containers
+    clearParticles();
+
+    // Dispose old audio synths and restart ambience
+    disposeAudio();
+    void initAudio();
 
     // Direct restart — skip title screen
     this.createBackground();

@@ -5,8 +5,12 @@ import type { WaveState } from "../components/Wave";
 import type { PlayerLevel } from "../components/PlayerLevel";
 import type { Inventory } from "../components/Inventory";
 import type { Health } from "../components/Health";
+import type { BossTag } from "../components/MapObject";
+import type { Transform } from "../components/Transform";
 import { scrapForLevel, ITEMS } from "../config/upgrades";
-import { FLOW_TARGET_TIME } from "../config/constants";
+import { setMasterVolume } from "../core/Audio";
+import { FLOW_TARGET_TIME, HORDE_DURATION } from "../config/constants";
+import { triggerShake } from "../core/ScreenShake";
 import { Text, TextStyle, Container, Graphics } from "pixi.js";
 
 // ─── Layout constants ──────────────────────────────────────────────────────────
@@ -54,7 +58,19 @@ const ITEM_ICON_COLORS: Record<string, number> = {
   might:     0xff4444,
   swiftness: 0xaa66ff,
   reach:     0x44ddaa,
+  luck:      0xf1c40f,
+  armor:     0x7f8c8d,
+  regen:     0x2ecc71,
+  crit:      0xff2222,
   multi:     0xffaa22,
+  boomerang: 0xd4a047,
+  mine:      0xff4444,
+  laser:     0xff3333,
+  aura:      0x27ae60,
+  ricochet:  0xe0e0e0,
+  gravity:   0x9b59b6,
+  chainsaw:  0xff8c00,
+  sentry:    0x8c8c8c,
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -103,10 +119,32 @@ export class HudSystem implements System {
   private lastHp = -1;
   private lastMaxHp = -1;
 
+  // ── Level-up sparks ──
+  private hudLayer: Container | null = null;
+  private levelSparks: Array<{ g: Graphics; life: number; vx: number; vy: number; x: number; y: number }> = [];
+
   // ── Item bar ──
   private itemBarContainer: Container;
   private itemSlots: Container[] = [];
   private lastItemKey = "";
+
+  // ── Act transitions ──
+  private act2Shown = false;
+  private act3Shown = false;
+
+  // ── Boss HP bar ──
+  private bossBarContainer: Container;
+  private bossBarBg: Graphics;
+  private bossBarFill: Graphics;
+  private bossNameText: Text;
+
+  // ── Off-screen indicators ──
+  private indicatorGraphics: Graphics;
+
+  // ── Mute button ──
+  private muteContainer: Container;
+  private muteIcon: Graphics;
+  private muted = false;
 
   constructor(
     world: World,
@@ -115,6 +153,7 @@ export class HudSystem implements System {
     screenHeight: number,
   ) {
     this.world        = world;
+    this.hudLayer     = hudLayer;
     this.screenWidth  = screenWidth;
     this.screenHeight = screenHeight;
 
@@ -146,7 +185,7 @@ export class HudSystem implements System {
     });
     this.levelLabel.anchor.set(0, 0.5);
     this.levelLabel.x = BAR_PAD_X;
-    this.levelLabel.y = BAR_Y + BAR_H / 2;  // vertically centered on bar
+    this.levelLabel.y = BAR_Y + BAR_H + 6;  // below the bar
     hudLayer.addChild(this.levelLabel);
 
     // ── Timer (centered, above everything) ──────────────────────────────────
@@ -168,7 +207,7 @@ export class HudSystem implements System {
     // ── HP display (top-right) ────────────────────────────────────────────────
     this.hpContainer = new Container();
     this.hpContainer.x = screenWidth - BAR_PAD_X;
-    this.hpContainer.y = BAR_Y + 2;
+    this.hpContainer.y = BAR_Y + BAR_H + 6;  // below the bar, aligned with level label
     hudLayer.addChild(this.hpContainer);
     this.hpGraphics = new Graphics();
     this.hpContainer.addChild(this.hpGraphics);
@@ -196,6 +235,48 @@ export class HudSystem implements System {
     // ── Item bar ─────────────────────────────────────────────────────────────
     this.itemBarContainer = new Container();
     hudLayer.addChild(this.itemBarContainer);
+
+    // ── Boss HP bar ──────────────────────────────────────────────────────────
+    this.bossBarContainer = new Container();
+    this.bossBarContainer.visible = false;
+    this.bossBarBg = new Graphics();
+    this.bossBarFill = new Graphics();
+    this.bossNameText = new Text({
+      text: "",
+      style: new TextStyle({
+        fontFamily: "monospace",
+        fontSize: 13,
+        fontWeight: "bold",
+        fill: 0xf0f0f0,
+      }),
+    });
+    this.bossNameText.anchor.set(0.5, 1);
+    this.bossNameText.x = screenWidth / 2;
+    this.bossNameText.y = BAR_Y + BAR_ROW_H + 2;
+    this.bossBarContainer.addChild(this.bossBarBg);
+    this.bossBarContainer.addChild(this.bossBarFill);
+    this.bossBarContainer.addChild(this.bossNameText);
+    hudLayer.addChild(this.bossBarContainer);
+
+    // ── Off-screen indicators ─────────────────────────────────────────────────
+    this.indicatorGraphics = new Graphics();
+    hudLayer.addChild(this.indicatorGraphics);
+
+    // ── Mute button (top-right, above HP pips) ───────────────────────────────
+    this.muteContainer = new Container();
+    this.muteContainer.x = screenWidth - 36;
+    this.muteContainer.y = BAR_Y + BAR_H + 24;
+    this.muteContainer.eventMode = "static";
+    this.muteContainer.cursor = "pointer";
+    this.muteIcon = new Graphics();
+    this.drawMuteIcon(false);
+    this.muteContainer.addChild(this.muteIcon);
+    this.muteContainer.on("pointertap", () => {
+      this.muted = !this.muted;
+      setMasterVolume(this.muted ? 0 : 1);
+      this.drawMuteIcon(this.muted);
+    });
+    hudLayer.addChild(this.muteContainer);
   }
 
   // ── Draw helpers ────────────────────────────────────────────────────────────
@@ -265,6 +346,24 @@ export class HudSystem implements System {
   // ── System update ────────────────────────────────────────────────────────────
 
   update(dt: number): void {
+    // Tick level-up sparks
+    for (let i = this.levelSparks.length - 1; i >= 0; i--) {
+      const sp = this.levelSparks[i];
+      sp.life -= dt;
+      if (sp.life <= 0) {
+        sp.g.removeFromParent(); sp.g.destroy();
+        this.levelSparks.splice(i, 1);
+      } else {
+        sp.vy += 300 * dt;
+        sp.x += sp.vx * dt;
+        sp.y += sp.vy * dt;
+        const t = 1 - sp.life / 0.5;
+        sp.g.clear().circle(0, 0, 2.5 * (1 - t * 0.6)).fill({ color: 0xffe580, alpha: 1 - t });
+        sp.g.x = sp.x;
+        sp.g.y = sp.y;
+      }
+    }
+
     const barW = this.screenWidth - BAR_PAD_X * 2;
 
     const players = this.world.query(["PlayerTag", "ScrapCollector"]);
@@ -283,6 +382,23 @@ export class HudSystem implements System {
           // A genuine level-up (not first frame initialisation)
           this.flashTimer  = this.FLASH_DURATION;
           this.displayFill = 0;  // snap fill back to zero so bar "refills" from scratch
+
+          // Spawn gold sparks from the XP bar
+          if (this.hudLayer) {
+            for (let s = 0; s < 5; s++) {
+              const sparkG = new Graphics();
+              sparkG.circle(0, 0, 2.5).fill(0xffe580);
+              this.hudLayer.addChild(sparkG);
+              this.levelSparks.push({
+                g: sparkG,
+                life: 0.35 + Math.random() * 0.2,
+                vx: (Math.random() - 0.3) * 120,
+                vy: -(80 + Math.random() * 100),
+                x: BAR_PAD_X + barW - Math.random() * barW * 0.3,
+                y: BAR_Y + BAR_H / 2,
+              });
+            }
+          }
         }
         this.lastLevel = level;
         this.levelLabel.text = `Lv. ${level}`;
@@ -326,8 +442,66 @@ export class HudSystem implements System {
       const remaining = Math.max(0, FLOW_TARGET_TIME - state.elapsed);
       this.timerText.text = formatTime(remaining);
       // Warm gold when under 60 s — matches the XP bar accent color for cohesion
-      this.timerText.style.fill = remaining <= 60 ? 0xd4a047 : 0xf0f0f0;
+      // Color: red during horde, gold under 60s, white otherwise
+      if (state.hordeActive > 0) {
+        this.timerText.style.fill = 0xe74c3c;
+        // Show HORDE announcement at start of horde
+        if (state.hordeActive > HORDE_DURATION - 0.1) {
+          this.showAnnouncement("HORDE!", this.screenWidth, this.screenHeight);
+        }
+      } else {
+        this.timerText.style.fill = remaining <= 60 ? 0xd4a047 : 0xf0f0f0;
+      }
+
+      // Act transitions
+      if (!this.act2Shown && state.elapsed >= 150) {
+        this.act2Shown = true;
+        this.showAnnouncement("ACT 2", this.screenWidth, this.screenHeight);
+        triggerShake(5, 0.15);
+      }
+      if (!this.act3Shown && state.elapsed >= 420) {
+        this.act3Shown = true;
+        this.showAnnouncement("ACT 3", this.screenWidth, this.screenHeight);
+        triggerShake(5, 0.15);
+      }
     }
+
+    // ── Boss HP bar ──────────────────────────────────────────────────────────
+    const bosses = this.world.query(["BossTag", "Health"]);
+    if (bosses.length > 0) {
+      this.bossBarContainer.visible = true;
+      const bossId = bosses[0];
+      const bossHealth = this.world.getComponent<Health>(bossId, "Health")!;
+      const bossTag = this.world.getComponent<BossTag>(bossId, "BossTag")!;
+      const bossBarW = this.screenWidth * 0.5;
+      const bossBarH = 8;
+      const bossBarX = (this.screenWidth - bossBarW) / 2;
+      const bossBarY = BAR_Y + BAR_ROW_H + 6;
+      const bossRatio = Math.max(0, bossHealth.current / bossHealth.max);
+
+      const bossNames: Record<string, string> = {
+        colossus: "COLOSSUS",
+        broadcaster: "BROADCASTER",
+        queen: "SWARM QUEEN",
+      };
+      this.bossNameText.text = bossNames[bossTag.bossType] ?? "BOSS";
+      this.bossNameText.x = this.screenWidth / 2;
+      this.bossNameText.y = bossBarY - 2;
+
+      this.bossBarBg.clear();
+      this.bossBarBg.roundRect(bossBarX, bossBarY, bossBarW, bossBarH, 3).fill({ color: 0x111111, alpha: 0.8 });
+      this.bossBarBg.roundRect(bossBarX, bossBarY, bossBarW, bossBarH, 3).stroke({ color: 0x444444, width: 1 });
+
+      this.bossBarFill.clear();
+      if (bossRatio > 0) {
+        this.bossBarFill.roundRect(bossBarX, bossBarY, bossBarW * bossRatio, bossBarH, 3).fill(0xe74c3c);
+      }
+    } else {
+      this.bossBarContainer.visible = false;
+    }
+
+    // ── Off-screen indicators ────────────────────────────────────────────────
+    this.updateOffScreenIndicators();
 
     // ── Announcement fade ─────────────────────────────────────────────────────
     if (this.announceTimer > 0) {
@@ -433,10 +607,56 @@ export class HudSystem implements System {
           icon.circle(cx, cy, 8).stroke({ color, width: 1, alpha: 0.5 });
           break;
         case "multi":
-          // Triple dots
           icon.circle(cx - 7, cy, 3).fill(color);
           icon.circle(cx, cy, 3).fill(color);
           icon.circle(cx + 7, cy, 3).fill(color);
+          break;
+        case "boomerang":
+          icon.rect(-8 + cx, -2 + cy, 16, 4).fill(color);
+          icon.rect(-2 + cx, -8 + cy, 4, 16).fill(color);
+          break;
+        case "mine":
+          icon.circle(cx, cy, 6).fill(0x333333);
+          icon.circle(cx, cy, 3).fill(color);
+          break;
+        case "laser":
+          icon.moveTo(cx - 8, cy).lineTo(cx + 8, cy).stroke({ color, width: 3 });
+          icon.circle(cx - 8, cy, 2).fill(0xffffff);
+          break;
+        case "aura":
+          icon.circle(cx, cy, 8).stroke({ color, width: 1.5, alpha: 0.5 });
+          icon.circle(cx, cy, 4).fill({ color, alpha: 0.4 });
+          break;
+        case "ricochet":
+          icon.moveTo(cx - 6, cy - 4).lineTo(cx, cy + 2).lineTo(cx + 6, cy - 6).stroke({ color, width: 2 });
+          break;
+        case "gravity":
+          icon.circle(cx, cy, 7).stroke({ color, width: 1.5 });
+          icon.circle(cx, cy, 3).fill(color);
+          icon.circle(cx, cy, 3).stroke({ color: 0xffffff, width: 1, alpha: 0.4 });
+          break;
+        case "chainsaw":
+          icon.rect(cx - 2, cy - 8, 4, 16).fill(color);
+          icon.rect(cx - 5, cy + 4, 10, 3).fill(0x666666);
+          break;
+        case "sentry":
+          icon.rect(cx - 6, cy - 6, 12, 12).fill(0x333333);
+          icon.rect(cx - 6, cy - 6, 12, 12).stroke({ color, width: 1.5 });
+          icon.circle(cx, cy, 3).fill(color);
+          break;
+        case "luck":
+          icon.circle(cx, cy, 7).stroke({ color, width: 2 });
+          icon.moveTo(cx, cy - 4).lineTo(cx + 3, cy + 3).lineTo(cx - 3, cy + 3).closePath().fill(color);
+          break;
+        case "armor":
+          icon.poly([cx, cy - 8, cx + 7, cy - 3, cx + 5, cy + 6, cx, cy + 8, cx - 5, cy + 6, cx - 7, cy - 3]).fill(color);
+          break;
+        case "regen":
+          icon.rect(cx - 1.5, cy - 7, 3, 14).fill(color);
+          icon.rect(cx - 7, cy - 1.5, 14, 3).fill(color);
+          break;
+        case "crit":
+          icon.moveTo(cx, cy - 8).lineTo(cx + 2, cy - 2).lineTo(cx + 8, cy).lineTo(cx + 2, cy + 2).lineTo(cx, cy + 8).lineTo(cx - 2, cy + 2).lineTo(cx - 8, cy).lineTo(cx - 2, cy - 2).closePath().fill(color);
           break;
       }
       slot.addChild(icon);
@@ -458,6 +678,90 @@ export class HudSystem implements System {
 
       this.itemBarContainer.addChild(slot);
       this.itemSlots.push(slot);
+    }
+  }
+
+  // ── Mute icon ──────────────────────────────────────────────────────────────
+
+  private drawMuteIcon(muted: boolean): void {
+    this.muteIcon.clear();
+    // Speaker body
+    this.muteIcon.moveTo(2, 6).lineTo(6, 6).lineTo(12, 2).lineTo(12, 18).lineTo(6, 14).lineTo(2, 14).closePath()
+      .fill({ color: muted ? 0x555555 : 0xcccccc });
+    if (muted) {
+      // X mark
+      this.muteIcon.moveTo(15, 7).lineTo(21, 13).stroke({ color: 0xe74c3c, width: 2 });
+      this.muteIcon.moveTo(21, 7).lineTo(15, 13).stroke({ color: 0xe74c3c, width: 2 });
+    } else {
+      // Sound waves
+      this.muteIcon.arc(12, 10, 5, -0.6, 0.6).stroke({ color: 0xcccccc, width: 1.5 });
+      this.muteIcon.arc(12, 10, 9, -0.5, 0.5).stroke({ color: 0x999999, width: 1 });
+    }
+    // Hit area
+    this.muteIcon.rect(-2, -2, 28, 24).fill({ color: 0x000000, alpha: 0.001 });
+  }
+
+  // ── Off-screen indicators ─────────────────────────────────────────────────
+
+  private updateOffScreenIndicators(): void {
+    this.indicatorGraphics.clear();
+
+    const players = this.world.query(["PlayerTag", "Transform"]);
+    if (players.length === 0) return;
+
+    const pT = this.world.getComponent<Transform>(players[0], "Transform")!;
+    const hw = this.screenWidth / 2;
+    const hh = this.screenHeight / 2;
+    const margin = 24; // arrow distance from edge
+
+    // Collect targets: bosses + caches
+    const targets: Array<{ x: number; y: number; color: number }> = [];
+
+    const bosses = this.world.query(["BossTag", "Transform"]);
+    for (const e of bosses) {
+      const t = this.world.getComponent<Transform>(e, "Transform")!;
+      targets.push({ x: t.x, y: t.y, color: 0xe74c3c });
+    }
+
+    const caches = this.world.query(["CacheTag", "Transform"]);
+    for (const e of caches) {
+      const t = this.world.getComponent<Transform>(e, "Transform")!;
+      targets.push({ x: t.x, y: t.y, color: 0xf1c40f });
+    }
+
+    let drawn = 0;
+    for (let i = 0; i < targets.length && drawn < 4; i++) {
+      const tgt = targets[i];
+      const dx = tgt.x - pT.x;
+      const dy = tgt.y - pT.y;
+
+      // Check if on-screen (with some padding)
+      if (Math.abs(dx) < hw - 20 && Math.abs(dy) < hh - 20) continue;
+
+      // Clamp to screen edge
+      const angle = Math.atan2(dy, dx);
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+
+      // Find intersection with screen rect
+      let sx: number;
+      let sy: number;
+      const scaleX = cos !== 0 ? (hw - margin) / Math.abs(cos) : Infinity;
+      const scaleY = sin !== 0 ? (hh - margin) / Math.abs(sin) : Infinity;
+      const scale = Math.min(scaleX, scaleY);
+      sx = hw + cos * scale;
+      sy = hh + sin * scale;
+
+      // Draw arrow pointing toward target
+      const arrowSize = 8;
+      this.indicatorGraphics
+        .moveTo(sx + Math.cos(angle) * arrowSize, sy + Math.sin(angle) * arrowSize)
+        .lineTo(sx + Math.cos(angle + 2.4) * arrowSize, sy + Math.sin(angle + 2.4) * arrowSize)
+        .lineTo(sx + Math.cos(angle - 2.4) * arrowSize, sy + Math.sin(angle - 2.4) * arrowSize)
+        .closePath()
+        .fill({ color: tgt.color, alpha: 0.85 });
+
+      drawn++;
     }
   }
 

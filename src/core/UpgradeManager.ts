@@ -19,8 +19,8 @@ export interface UpgradeChoice {
 /** First level-up offers curated choices to teach the system */
 const FIRST_LEVELUP_ITEMS = ["turret", "tesla", "magnet"];
 
-/** Generate 3 upgrade choices based on current inventory */
-export function generateChoices(inventory: InventorySlot[], playerLevel: number): UpgradeChoice[] {
+/** Generate upgrade choices based on current inventory */
+export function generateChoices(inventory: InventorySlot[], playerLevel: number, choiceCount = 3): UpgradeChoice[] {
   // First level-up: forced curated choices (onboarding)
   if (playerLevel === 1) {
     return FIRST_LEVELUP_ITEMS.map((id) => {
@@ -39,8 +39,8 @@ export function generateChoices(inventory: InventorySlot[], playerLevel: number)
   const choices: UpgradeChoice[] = [];
   const pool = buildPool(inventory);
 
-  // Pick 3 unique choices from the pool
-  for (let i = 0; i < 3 && pool.length > 0; i++) {
+  // Pick choices from the pool
+  for (let i = 0; i < choiceCount && pool.length > 0; i++) {
     const idx = Math.floor(Math.random() * pool.length);
     const picked = pool.splice(idx, 1)[0];
     choices.push(picked);

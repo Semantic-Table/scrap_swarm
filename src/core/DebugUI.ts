@@ -4,6 +4,8 @@ import type { ScrapCollector } from "../components/ScrapCollector";
 import type { Inventory } from "../components/Inventory";
 import type { Health } from "../components/Health";
 import { ITEMS } from "../config/upgrades";
+import { EVOLUTIONS } from "../config/evolutions";
+import type { EvolutionState } from "../components/Evolution";
 import { applyUpgrade } from "./UpgradeEffects";
 import { checkEvolutions } from "./EvolutionManager";
 
@@ -17,6 +19,12 @@ export class DebugUI {
   private world: World | null = null;
   private stage: Container | null = null;
   private visible = false;
+  private scrollContent: Container | null = null;
+  private scrollMask: Graphics | null = null;
+  private scrollY = 0;
+  private contentHeight = 0;
+  private panelH = 0;
+  private wheelHandler: ((e: WheelEvent) => void) | null = null;
 
   constructor() {
     this.container = new Container();
@@ -29,7 +37,22 @@ export class DebugUI {
     if (this.visible) {
       this.world = world;
       this.stage = stage;
+      this.scrollY = 0;
       this.rebuild(screenW, screenH);
+      this.wheelHandler = (e: WheelEvent) => {
+        this.scrollY = Math.max(0, Math.min(
+          Math.max(0, this.contentHeight - this.panelH + 60),
+          this.scrollY + e.deltaY * 0.5,
+        ));
+        if (this.scrollContent) this.scrollContent.y = -this.scrollY;
+        e.preventDefault();
+      };
+      window.addEventListener("wheel", this.wheelHandler, { passive: false });
+    } else {
+      if (this.wheelHandler) {
+        window.removeEventListener("wheel", this.wheelHandler);
+        this.wheelHandler = null;
+      }
     }
     return this.visible;
   }
@@ -37,52 +60,63 @@ export class DebugUI {
   hide(): void {
     this.visible = false;
     this.container.visible = false;
+    if (this.wheelHandler) {
+      window.removeEventListener("wheel", this.wheelHandler);
+      this.wheelHandler = null;
+    }
   }
 
-  private rebuild(screenW: number, _screenH: number): void {
-    // Clear old
-    this.container.removeChildren();
-    for (let i = this.container.children.length - 1; i >= 0; i--) {
-      this.container.children[i].destroy({ children: true });
-    }
+  private rebuild(screenW: number, screenH: number): void {
+    const old = this.container.removeChildren();
+    for (const child of old) child.destroy({ children: true });
 
     const world = this.world!;
     const stage = this.stage!;
 
-    // Background panel
     const items = Object.values(ITEMS);
-    const rows = items.length + 2; // +XP, +HP, then each item
     const panelW = COL_W * 2 + 20;
-    const panelH = rows * (BTN_H + BTN_GAP) + 50;
+    this.panelH = screenH - 20;
     const px = screenW - panelW - 10;
-    const py = 60;
+    const py = 10;
 
+    // Panel background
     const bg = new Graphics();
-    bg.roundRect(px, py, panelW, panelH, 8).fill({ color: 0x000000, alpha: 0.85 });
-    bg.roundRect(px, py, panelW, panelH, 8).stroke({ color: 0x444444, width: 1 });
+    bg.roundRect(px, py, panelW, this.panelH, 8).fill({ color: 0x000000, alpha: 0.85 });
+    bg.roundRect(px, py, panelW, this.panelH, 8).stroke({ color: 0x444444, width: 1 });
     this.container.addChild(bg);
 
     const titleText = new Text({
-      text: "DEBUG (F1)",
-      style: new TextStyle({ fontFamily: "monospace", fontSize: 12, fontWeight: "bold", fill: 0xff4444 }),
+      text: "DEBUG (F1) — Scroll ↕",
+      style: new TextStyle({ fontFamily: "monospace", fontSize: 11, fontWeight: "bold", fill: 0xff4444 }),
     });
     titleText.x = px + 10;
     titleText.y = py + 6;
     this.container.addChild(titleText);
 
-    let y = py + 28;
+    // Scrollable content
+    const contentTop = py + 24;
+    const contentAreaH = this.panelH - 34;
 
-    // +1000 XP button
-    this.addButton(px + 10, y, "+1000 XP", 0x2ecc71, () => {
+    this.scrollContent = new Container();
+    this.container.addChild(this.scrollContent);
+
+    this.scrollMask = new Graphics();
+    this.scrollMask.rect(px, contentTop, panelW, contentAreaH).fill(0xffffff);
+    this.container.addChild(this.scrollMask);
+    this.scrollContent.mask = this.scrollMask;
+    this.scrollContent.y = -this.scrollY;
+
+    let y = contentTop + 4;
+
+    // +XP / +HP buttons
+    this.addButton(this.scrollContent, px + 10, y, "+1000 XP", 0x2ecc71, () => {
       const players = world.query(["PlayerTag", "ScrapCollector"]);
       if (players.length > 0) {
         const c = world.getComponent<ScrapCollector>(players[0], "ScrapCollector")!;
         c.amount += 1000;
       }
     });
-
-    // +HP button
-    this.addButton(px + COL_W + 10, y, "+5 HP", 0xe74c3c, () => {
+    this.addButton(this.scrollContent, px + COL_W + 10, y, "+5 HP", 0xe74c3c, () => {
       const players = world.query(["PlayerTag", "Health"]);
       if (players.length > 0) {
         const h = world.getComponent<Health>(players[0], "Health")!;
@@ -91,32 +125,38 @@ export class DebugUI {
     });
     y += BTN_H + BTN_GAP;
 
-    // One button per item — click to acquire or upgrade
+    // Item buttons
+    const itemLabel = new Text({
+      text: "ITEMS",
+      style: new TextStyle({ fontFamily: "monospace", fontSize: 10, fontWeight: "bold", fill: 0x888888 }),
+    });
+    itemLabel.x = px + 10;
+    itemLabel.y = y;
+    this.scrollContent.addChild(itemLabel);
+    y += 14;
+
     for (const item of items) {
-      this.addButton(px + 10, y, item.name, 0xd4a047, () => {
+      this.addButton(this.scrollContent, px + 10, y, item.name, 0xd4a047, () => {
         const players = world.query(["PlayerTag", "Inventory"]);
         if (players.length === 0) return;
         const inv = world.getComponent<Inventory>(players[0], "Inventory")!;
         const slot = inv.slots.find((s) => s.itemId === item.id);
 
         if (!slot) {
-          // Acquire new
           applyUpgrade(
             { itemId: item.id, item, isNew: true, rarity: "epic", description: item.description, currentLevel: 0 },
             world, stage,
           );
         } else if (slot.level < item.maxLevel) {
-          // Upgrade existing
           applyUpgrade(
             { itemId: item.id, item, isNew: false, rarity: "epic", description: item.upgradeDescriptions.epic, currentLevel: slot.level },
             world, stage,
           );
         }
         checkEvolutions(world);
-        this.rebuild(screenW, _screenH);
+        this.rebuild(screenW, screenH);
       });
 
-      // Show current level
       const players = world.query(["PlayerTag", "Inventory"]);
       let lvlStr = "—";
       if (players.length > 0) {
@@ -130,15 +170,83 @@ export class DebugUI {
       });
       lvl.x = px + BTN_W + 20;
       lvl.y = y + 6;
-      this.container.addChild(lvl);
+      this.scrollContent.addChild(lvl);
 
       y += BTN_H + BTN_GAP;
     }
 
-    // panel built
+    // Evolution buttons
+    const evoLabel = new Text({
+      text: "EVOLUTIONS",
+      style: new TextStyle({ fontFamily: "monospace", fontSize: 10, fontWeight: "bold", fill: 0xf1c40f }),
+    });
+    evoLabel.x = px + 10;
+    evoLabel.y = y + 4;
+    this.scrollContent.addChild(evoLabel);
+    y += 16;
+
+    const evoPlayers = world.query(["PlayerTag", "EvolutionState"]);
+    const evoState = evoPlayers.length > 0
+      ? world.getComponent<EvolutionState>(evoPlayers[0], "EvolutionState")
+      : null;
+
+    for (const evo of EVOLUTIONS) {
+      const active = evoState?.active.includes(evo.id) ?? false;
+      this.addButton(this.scrollContent, px + 10, y, active ? `✓ ${evo.name}` : evo.name, active ? 0x666666 : evo.color, () => {
+        if (active || !evoState) return;
+
+        const inv = world.getComponent<Inventory>(evoPlayers[0], "Inventory")!;
+        for (const requiredId of [evo.weaponId, evo.passiveId]) {
+          let slot = inv.slots.find((s) => s.itemId === requiredId);
+          if (!slot) {
+            const item = ITEMS[requiredId];
+            if (item) {
+              applyUpgrade(
+                { itemId: requiredId, item, isNew: true, rarity: "epic", description: item.description, currentLevel: 0 },
+                world, stage,
+              );
+              slot = inv.slots.find((s) => s.itemId === requiredId);
+            }
+          }
+          if (slot) {
+            while (slot.level < 5) {
+              const item = ITEMS[slot.itemId];
+              if (!item) break;
+              applyUpgrade(
+                { itemId: slot.itemId, item, isNew: false, rarity: "epic", description: item.upgradeDescriptions.epic, currentLevel: slot.level },
+                world, stage,
+              );
+            }
+          }
+        }
+
+        checkEvolutions(world);
+        if (!evoState.active.includes(evo.id)) {
+          evoState.active.push(evo.id);
+        }
+        this.rebuild(screenW, screenH);
+      });
+      y += BTN_H + BTN_GAP;
+    }
+
+    this.contentHeight = y - contentTop;
+
+    // Touch drag
+    bg.eventMode = "static";
+    let dragStartY = 0;
+    let dragScrollStart = 0;
+    bg.on("pointerdown", (e) => { dragStartY = e.globalY; dragScrollStart = this.scrollY; });
+    bg.on("pointermove", (e) => {
+      if (e.pressure > 0 && this.scrollContent) {
+        const delta = dragStartY - e.globalY;
+        const maxScroll = Math.max(0, this.contentHeight - contentAreaH);
+        this.scrollY = Math.max(0, Math.min(maxScroll, dragScrollStart + delta));
+        this.scrollContent.y = -this.scrollY;
+      }
+    });
   }
 
-  private addButton(x: number, y: number, label: string, color: number, onClick: () => void): void {
+  private addButton(parent: Container, x: number, y: number, label: string, color: number, onClick: () => void): void {
     const btn = new Container();
     btn.x = x;
     btn.y = y;
@@ -150,7 +258,7 @@ export class DebugUI {
 
     const txt = new Text({
       text: label,
-      style: new TextStyle({ fontFamily: "monospace", fontSize: 11, fill: color }),
+      style: new TextStyle({ fontFamily: "monospace", fontSize: 10, fill: color }),
     });
     txt.anchor.set(0.5);
     txt.x = BTN_W / 2;
@@ -163,6 +271,6 @@ export class DebugUI {
     btn.on("pointerout", () => { bg.tint = 0xffffff; });
     btn.on("pointertap", onClick);
 
-    this.container.addChild(btn);
+    parent.addChild(btn);
   }
 }

@@ -135,7 +135,7 @@ export const FLOW_INITIAL_INTERVAL = 1.2;   // seconds between pack spawns at st
 export const FLOW_MIN_INTERVAL = 0.2;       // fastest possible spawn rate
 export const FLOW_SPEED_SCALE = 0.15;       // enemy speed increase per minute
 export const FLOW_INTERVAL_SCALE = 0.10;    // spawn interval decrease per minute
-export const FLOW_HP_SCALE_INTERVAL = 270;  // seconds between enemy HP increases
+export const FLOW_HP_SCALE_INTERVAL = 120;  // seconds between enemy HP increases (every 2 min)
 export const FLOW_TARGET_TIME = 600;        // 10 minutes in seconds
 
 // Horde events — periodic difficulty spikes
@@ -155,6 +155,121 @@ export const PROP_SPAWN_INTERVAL = 20;  // seconds between prop spawns
 export const PROP_SIZE = 14;
 export const PROP_COLOR = 0x7a6840;
 export const PROP_HP = 2;
+
+// Boomerang
+export const BOOMERANG_COOLDOWN = 1.2;
+export const BOOMERANG_DAMAGE = 1;
+export const BOOMERANG_RANGE = 150;
+export const BOOMERANG_SPEED = 300;
+export const BOOMERANG_COLOR = 0xd4a047;
+
+// Mine
+export const MINE_COOLDOWN = 1.5;
+export const MINE_DAMAGE = 3;
+export const MINE_RADIUS = 60;
+export const MINE_COLOR = 0xff4444;
+export const MINE_LIFETIME = 8;
+
+// Laser
+export const LASER_COOLDOWN = 2.0;
+export const LASER_DAMAGE = 2;
+export const LASER_RANGE = 400;
+export const LASER_WIDTH = 6;
+export const LASER_COLOR = 0xff3333;
+export const LASER_DURATION = 0.15;
+
+// Aura (poison DoT)
+export const AURA_COOLDOWN = 0.5;
+export const AURA_DAMAGE = 1;
+export const AURA_RADIUS = 80;
+export const AURA_COLOR = 0x27ae60;
+
+// Ricochet Bolt
+export const RICOCHET_COOLDOWN = 0.8;
+export const RICOCHET_DAMAGE = 1;
+export const RICOCHET_SPEED = 400;
+export const RICOCHET_BOUNCES = 3;
+export const RICOCHET_COLOR = 0xe0e0e0;
+
+// Gravity Well
+export const GRAVITY_COOLDOWN = 4.0;
+export const GRAVITY_DAMAGE = 5;
+export const GRAVITY_RADIUS = 120;
+export const GRAVITY_PULL_DURATION = 1.5;
+export const GRAVITY_COLOR = 0x9b59b6;
+
+// Chain Saw
+export const SAW_COOLDOWN = 0.1;
+export const SAW_DAMAGE = 1;
+export const SAW_RANGE = 45;
+export const SAW_ARC = Math.PI / 3;
+export const SAW_COLOR = 0xff8c00;
+
+// Scrap Turret (stationary)
+export const SENTRY_COOLDOWN = 0.6;
+export const SENTRY_RANGE = 200;
+export const SENTRY_DAMAGE = 1;
+export const SENTRY_LIFETIME = 15;
+export const SENTRY_COLOR = 0x8c8c8c;
+export const SENTRY_DEPLOY_COOLDOWN = 8;
+
+// Scrap Caches — map objectives
+export const CACHE_SPAWN_INTERVAL = 60;
+export const CACHE_SPAWN_DISTANCE = 350;
+export const CACHE_SIZE = 22;
+export const CACHE_HP = 6;
+export const CACHE_COLOR = 0xb8860b;
+export const CACHE_SCRAP_DROP = 15;
+export const CACHE_STOP_AT = 420;
+
+// Power Crates
+export const MAGNETITE_INTERVAL = 90;
+export const MAGNETITE_COLOR = 0x3498db;
+export const MAGNETITE_SPAWN_DIST = 500;
+export const OVERCLOCK_INTERVAL = 120;
+export const OVERCLOCK_DURATION = 8.0;
+export const OVERCLOCK_COLOR = 0xf5c842;
+export const REPAIR_COLOR = 0x2ecc71;
+export const REPAIR_COOLDOWN = 15;
+export const REPAIR_HEAL = 2;
+export const POWER_CRATE_SIZE = 14;
+
+// Bosses
+export const BOSS_A_HP = 30;
+export const BOSS_A_SIZE = 48;
+export const BOSS_A_COLOR = 0xc882ff;
+export const BOSS_A_SPAWN_AT = 150;
+export const BOSS_A_SHOCKWAVE_INTERVAL = 3.0;
+export const BOSS_A_SHOCKWAVE_SPEED = 200;
+
+export const BOSS_B_HP = 50;
+export const BOSS_B_SIZE = 36;
+export const BOSS_B_COLOR = 0xff69b4;
+export const BOSS_B_SPAWN_AT = 420;
+export const BOSS_B_FIRE_INTERVAL = 0.8;
+export const BOSS_B_SUMMON_INTERVAL = 6.0;
+
+// Swarm Queen — final boss
+export const QUEEN_SPAWN_AT = 570;
+export const QUEEN_HP = 80;
+export const QUEEN_SIZE = 50;
+export const QUEEN_SPEED = 120;
+export const QUEEN_COLOR = 0x1abc9c;
+export const QUEEN_SWARM_INTERVAL = 1.5;
+export const QUEEN_SWARM_COUNT = 12;
+export const QUEEN_PULSE_INTERVAL = 8.0;
+export const QUEEN_PULSE_COUNT = 8;
+export const QUEEN_PULSE_SPEED = 150;
+export const QUEEN_SCRAP_DROP = 60;
+
+// Enemy spawn weights (weighted random selection)
+export const ENEMY_SPAWN_WEIGHTS: Record<EnemyTypeName, number> = {
+  basic: 30,
+  runner: 25,
+  swarm: 20,
+  tank: 15,
+  shooter: 10,
+};
 
 // Display
 export const BG_COLOR = "#1a1a2e";

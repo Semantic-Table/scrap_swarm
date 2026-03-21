@@ -6,6 +6,7 @@ import { Graphics } from "pixi.js";
 import { getItemLevel, getBonusDamage, getCooldownMult, getRangeMult, getQuantityBonus } from "../core/UpgradeEffects";
 import { damageEnemy } from "../core/Combat";
 import { hasEvolution } from "../core/EvolutionManager";
+import { playTesla } from "../core/Audio";
 import {
   TESLA_COOLDOWN,
   TESLA_RANGE,
@@ -21,7 +22,9 @@ export class TeslaSystem implements System {
   private world: World;
   private stage: Container;
   private timer = 0;
+  private stormSoundTimer = 0;
   private pendingChains: Array<{ delay: number; bounces: number; damage: number }> = [];
+  private activeLightning: Array<{ g: Graphics; remaining: number }> = [];
 
   constructor(world: World, stage: Container) {
     this.world = world;
@@ -29,6 +32,16 @@ export class TeslaSystem implements System {
   }
 
   update(dt: number): void {
+    // Process lightning fade-out
+    for (let i = this.activeLightning.length - 1; i >= 0; i--) {
+      this.activeLightning[i].remaining -= dt;
+      if (this.activeLightning[i].remaining <= 0) {
+        const { g } = this.activeLightning.splice(i, 1)[0];
+        g.removeFromParent();
+        g.destroy();
+      }
+    }
+
     // Process pending delayed chains
     for (let i = this.pendingChains.length - 1; i >= 0; i--) {
       this.pendingChains[i].delay -= dt;
@@ -56,6 +69,12 @@ export class TeslaSystem implements System {
     // --- STORM evolution: persistent field hitting all enemies in range ---
     if (hasEvolution(this.world, "storm")) {
       this.timer = 0.3 * getCooldownMult(this.world); // tick every 0.3s
+      this.stormSoundTimer -= this.timer;
+      // Play sound at most once per ~0.6s to avoid audio spam during Storm
+      if (this.stormSoundTimer <= 0) {
+        playTesla();
+        this.stormSoundTimer = 0.6;
+      }
       const stormRange = TESLA_RANGE * getRangeMult(this.world) * 1.3;
       this.stormField(pT.x, pT.y, stormRange, Math.max(1, Math.floor(damage * 0.5)));
       return;
@@ -65,6 +84,7 @@ export class TeslaSystem implements System {
     this.timer = TESLA_COOLDOWN * getCooldownMult(this.world);
     const bounces = TESLA_BASE_BOUNCES + (level - 1);
 
+    playTesla();
     this.fireChain(pT.x, pT.y, bounces, damage);
 
     // Queue extra chains from Quantité
@@ -188,10 +208,6 @@ export class TeslaSystem implements System {
     g.stroke({ color: 0xffffff, width: 1, alpha: 0.6 });
 
     this.stage.addChild(g);
-
-    setTimeout(() => {
-      g.removeFromParent();
-      g.destroy();
-    }, TESLA_FLASH_DURATION * 1000);
+    this.activeLightning.push({ g, remaining: TESLA_FLASH_DURATION });
   }
 }

@@ -4,6 +4,7 @@ import type { Transform } from "../components/Transform";
 import type { Sprite } from "../components/Sprite";
 import type { Health } from "../components/Health";
 import type { Shield } from "../components/Shield";
+import type { Velocity } from "../components/Velocity";
 import type { EnemyType } from "../components/EnemyType";
 import { Graphics } from "pixi.js";
 import { PLAYER_SIZE, ENEMY_TYPES } from "../config/constants";
@@ -21,6 +22,7 @@ export class RenderSystem implements System {
   private playerCoreGlow: Graphics | null = null;
   private dangerVignette: Graphics | null = null;
   private enemyHpBar: Graphics | null = null;
+  private speedLines: Graphics | null = null;
 
   constructor(world: World) {
     this.world = world;
@@ -84,6 +86,7 @@ export class RenderSystem implements System {
     this.drawPlayerCoreGlow();
     this.drawDangerVignette();
     this.drawEnemyHpBars();
+    this.drawSpeedLines();
   }
 
   private drawPlayerHealthBar(): void {
@@ -247,6 +250,67 @@ export class RenderSystem implements System {
     this.dangerVignette.rect(0, 9999 - 80, 9999, 80).fill({ color, alpha: alpha * 0.8 });
     this.dangerVignette.rect(0, 0, 100, 9999).fill({ color, alpha: alpha * 0.5 });
     this.dangerVignette.rect(9999 - 100, 0, 100, 9999).fill({ color, alpha: alpha * 0.5 });
+  }
+
+  /** Draw trailing speed lines behind the player when moving fast */
+  private drawSpeedLines(): void {
+    const players = this.world.query(["PlayerTag", "Velocity", "Transform"]);
+    if (players.length === 0) {
+      if (this.speedLines) this.speedLines.visible = false;
+      return;
+    }
+
+    const playerId = players[0];
+    const vel = this.world.getComponent<Velocity>(playerId, "Velocity")!;
+    const transform = this.world.getComponent<Transform>(playerId, "Transform")!;
+    const sprite = this.world.getComponent<Sprite>(playerId, "Sprite");
+
+    const speed = Math.sqrt(vel.vx * vel.vx + vel.vy * vel.vy);
+
+    if (speed < 100) {
+      if (this.speedLines) this.speedLines.visible = false;
+      return;
+    }
+
+    if (!this.speedLines) {
+      this.speedLines = new Graphics();
+      this.speedLines.zIndex = -1;
+      if (sprite?.graphic.parent) {
+        sprite.graphic.parent.addChild(this.speedLines);
+      }
+    }
+    this.speedLines.visible = true;
+    this.speedLines.clear();
+
+    // Direction opposite to movement
+    const moveAngle = Math.atan2(vel.vy, vel.vx);
+    const backAngle = moveAngle + Math.PI;
+
+    // Speed factor 0..1 (100 = min, 400 = full effect)
+    const factor = Math.min(1, (speed - 100) / 300);
+    const lineCount = 4 + Math.floor(factor * 2); // 4-6 lines
+    const lineLength = 10 + factor * 25; // 10-35 px
+    const alpha = 0.15 + factor * 0.35;  // 0.15-0.5
+
+    const fanSpread = 0.6; // radians total fan width
+
+    for (let i = 0; i < lineCount; i++) {
+      // Fan lines slightly around the back direction
+      const t = lineCount > 1 ? (i / (lineCount - 1)) - 0.5 : 0;
+      const angle = backAngle + t * fanSpread;
+
+      // Start from player edge
+      const startDist = PLAYER_SIZE + 4 + Math.random() * 4;
+      const sx = transform.x + Math.cos(angle) * startDist;
+      const sy = transform.y + Math.sin(angle) * startDist;
+      const ex = sx + Math.cos(angle) * lineLength;
+      const ey = sy + Math.sin(angle) * lineLength;
+
+      this.speedLines
+        .moveTo(sx, sy)
+        .lineTo(ex, ey)
+        .stroke({ color: 0xd4a047, width: 1.5, alpha });
+    }
   }
 
   /** Draw small HP bars above damaged enemies using a single reusable Graphics */

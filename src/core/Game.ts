@@ -66,6 +66,7 @@ import { ChainSawSystem } from "../systems/ChainSawSystem";
 import { SentrySystem } from "../systems/SentrySystem";
 import { HudSystem } from "../systems/HudSystem";
 import { BossSystem } from "../systems/BossSystem";
+import { LavaVentSystem } from "../systems/LavaVentSystem";
 import { CameraSystem } from "../systems/CameraSystem";
 
 // CrazyGames SDK
@@ -108,6 +109,7 @@ export class Game {
   private paused = false;
   private adBonusHp = 0;
   private lastRunWasVictory = false;
+  private selectedStartWeapon: string | null = null;
 
   constructor() {
     this.app = new Application();
@@ -437,7 +439,7 @@ export class Game {
           dismissed = true;
           this.app.ticker.remove(tickFn);
           overlay.destroy({ children: true });
-          this.paused = false;
+          this.showWeaponSelectOrStart();
         }
       }
     };
@@ -456,6 +458,137 @@ export class Game {
     title.on("pointertap", () => dismiss());
     prompt.eventMode = "static";
     prompt.on("pointertap", () => dismiss());
+  }
+
+  /**
+   * If the player has garage weapon protocols unlocked, show a weapon select
+   * overlay. Otherwise, skip straight to gameplay.
+   */
+  private showWeaponSelectOrStart(): void {
+    const weapons = getGarageStartingWeapons();
+    if (weapons.length === 0) {
+      this.selectedStartWeapon = null;
+      this.paused = false;
+      return;
+    }
+
+    this.paused = true;
+
+    const sw = this.app.screen.width;
+    const sh = this.app.screen.height;
+    const cx = sw / 2;
+    const cy = sh / 2;
+
+    const overlay = new Container();
+    this.app.stage.addChild(overlay);
+
+    // Dim scrim
+    const scrim = new Graphics();
+    scrim.rect(0, 0, sw, sh).fill({ color: 0x0a0a15, alpha: 0.75 });
+    scrim.eventMode = "static"; // block clicks through
+    overlay.addChild(scrim);
+
+    // Title
+    const title = new Text({
+      text: "CHOOSE STARTING WEAPON",
+      style: new TextStyle({
+        fontFamily: "monospace",
+        fontSize: 22,
+        fontWeight: "bold",
+        fill: 0xd4a047,
+        letterSpacing: 2,
+      }),
+    });
+    title.anchor.set(0.5);
+    title.x = cx;
+    title.y = cy - 60;
+    overlay.addChild(title);
+
+    const weaponLabels: Record<string, string> = {
+      turret: "TURRET",
+      tesla: "TESLA",
+      pulse: "PULSE",
+    };
+    const weaponColors: Record<string, number> = {
+      turret: 0x5dade2,
+      tesla: 0x00e5ff,
+      pulse: 0xff6b35,
+    };
+
+    const allOptions = [...weapons, "none"];
+    const pillW = 120;
+    const pillH = 36;
+    const gap = 12;
+    const totalW = allOptions.length * pillW + (allOptions.length - 1) * gap;
+    const startX = cx - totalW / 2;
+
+    const pick = (weaponId: string) => {
+      this.selectedStartWeapon = weaponId === "none" ? null : weaponId;
+      // Re-apply to inventory if game already started
+      const players = this.world.query(["PlayerTag", "Inventory"]);
+      if (players.length > 0 && this.selectedStartWeapon) {
+        const inv = this.world.getComponent<Inventory>(players[0], "Inventory")!;
+        if (!inv.slots.find((s) => s.itemId === this.selectedStartWeapon)) {
+          inv.slots.push({ itemId: this.selectedStartWeapon!, level: 1 });
+        }
+      }
+      overlay.destroy({ children: true });
+      this.paused = false;
+    };
+
+    for (let i = 0; i < allOptions.length; i++) {
+      const wid = allOptions[i];
+      const label = wid === "none" ? "NONE" : (weaponLabels[wid] ?? wid.toUpperCase());
+      const color = wid === "none" ? 0x888888 : (weaponColors[wid] ?? 0xd4a047);
+
+      const pill = new Container();
+      pill.x = startX + i * (pillW + gap);
+      pill.y = cy - pillH / 2;
+      pill.eventMode = "static";
+      pill.cursor = "pointer";
+
+      const bg = new Graphics();
+      bg.roundRect(0, 0, pillW, pillH, 12).fill({ color: 0x22223a });
+      bg.roundRect(0, 0, pillW, pillH, 12).stroke({ color: 0x3a3a5a, width: 1.5 });
+      pill.addChild(bg);
+
+      const txt = new Text({
+        text: label,
+        style: new TextStyle({
+          fontFamily: "monospace",
+          fontSize: 14,
+          fontWeight: "bold",
+          fill: color,
+        }),
+      });
+      txt.anchor.set(0.5);
+      txt.x = pillW / 2;
+      txt.y = pillH / 2;
+      pill.addChild(txt);
+
+      pill.on("pointerover", () => {
+        bg.clear();
+        bg.roundRect(0, 0, pillW, pillH, 12).fill({ color: 0x2a2a4a });
+        bg.roundRect(0, 0, pillW, pillH, 12).stroke({ color, width: 1.5 });
+      });
+      pill.on("pointerout", () => {
+        bg.clear();
+        bg.roundRect(0, 0, pillW, pillH, 12).fill({ color: 0x22223a });
+        bg.roundRect(0, 0, pillW, pillH, 12).stroke({ color: 0x3a3a5a, width: 1.5 });
+      });
+      pill.on("pointertap", () => pick(wid));
+      overlay.addChild(pill);
+    }
+
+    // Keyboard support: number keys 1-N to pick
+    const onKey = (e: KeyboardEvent) => {
+      const idx = parseInt(e.key) - 1;
+      if (idx >= 0 && idx < allOptions.length) {
+        window.removeEventListener("keydown", onKey);
+        pick(allOptions[idx]);
+      }
+    };
+    window.addEventListener("keydown", onKey);
   }
 
   private tutorialShown = false;
@@ -601,10 +734,10 @@ export class Game {
     this.world.addComponent(entity, createScrapCollector(SCRAP_PICKUP_RADIUS));
     const inventory = createInventory();
     inventory.slots.push({ itemId: "sword", level: 1 });
-    // Starting weapons from garage protocols
-    for (const weaponId of getGarageStartingWeapons()) {
-      if (!inventory.slots.find((s) => s.itemId === weaponId)) {
-        inventory.slots.push({ itemId: weaponId, level: 1 });
+    // Starting weapon from weapon select (garage protocols)
+    if (this.selectedStartWeapon && this.selectedStartWeapon !== "none") {
+      if (!inventory.slots.find((s) => s.itemId === this.selectedStartWeapon)) {
+        inventory.slots.push({ itemId: this.selectedStartWeapon, level: 1 });
       }
     }
     this.world.addComponent(entity, inventory);
@@ -664,6 +797,8 @@ export class Game {
     this.world.addSystem(new EnemyAISystem(this.world));
     this.world.addSystem(new EnemyShootSystem(this.world, gc));
     this.world.addSystem(new BossSystem(this.world, gc));
+    // 6b. Lava Vents: environmental hazard (Act 2+)
+    this.world.addSystem(new LavaVentSystem(this.world, gc));
     this.world.addSystem(new MovementSystem(this.world));
     this.world.addSystem(new OrbitSystem(this.world));
     this.world.addSystem(new ProjectileHitSystem(this.world, gc));
@@ -1022,6 +1157,7 @@ export class Game {
     this.playerRing = null;
     this.playerBody = null;
     this.breatheTimer = 0;
+    this.selectedStartWeapon = null;
 
     // Reset singleton state
     hitStop.timer = 0;
@@ -1037,9 +1173,10 @@ export class Game {
     disposeAudio();
     void initAudio();
 
-    // Direct restart — skip title screen
+    // Direct restart — skip title screen but show weapon select if applicable
     this.createBackground();
     this.app.stage.addChild(this.background);
     this.beginGame();
+    this.showWeaponSelectOrStart();
   }
 }

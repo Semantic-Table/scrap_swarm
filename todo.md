@@ -77,9 +77,8 @@
 
 ### P3 — Nice to have
 
-- [ ] **Environmental hazards** — lava vents (dégâts zone)
-- [ ] **Facing indicator pour le laser/chainsaw** — ces armes dépendent de l'orientation
-- [ ] **Speed lines** derrière le joueur quand il bouge vite
-- [ ] **Off-screen danger arrows** pour les tanks et shooters
+- [x] **Lava Vents** — spawns Act 2+, 3 phases (dormant/warning/active), dégâts zone joueur+ennemis
+- [x] **Speed lines** — trailing lines derrière le joueur, proportionnel à la vitesse
+- [x] **Off-screen danger arrows** — tanks et shooters proches en plus des bosses/caches, cap 6
+- [x] **Weapon select** — choix d'arme de départ (turret/tesla/pulse) si Protocol acheté dans le Garage
 - [ ] **Cosmétiques** dans le Garage (couleurs de joueur, trail effects)
-- [ ] **2ème arme de départ sélectionnable** (weapon select avant le run si Protocol acheté)

@@ -7,7 +7,9 @@ import type { Inventory } from "../components/Inventory";
 import type { Health } from "../components/Health";
 import type { BossTag } from "../components/MapObject";
 import type { Transform } from "../components/Transform";
+import type { EnemyType } from "../components/EnemyType";
 import { scrapForLevel, ITEMS } from "../config/upgrades";
+import { ENEMY_TYPES } from "../config/constants";
 import { setMasterVolume } from "../core/Audio";
 import { FLOW_TARGET_TIME, HORDE_DURATION } from "../config/constants";
 import { triggerShake } from "../core/ScreenShake";
@@ -714,23 +716,38 @@ export class HudSystem implements System {
     const hh = this.screenHeight / 2;
     const margin = 24; // arrow distance from edge
 
-    // Collect targets: bosses + caches
-    const targets: Array<{ x: number; y: number; color: number }> = [];
+    // Collect targets: bosses + caches (priority), then tank/shooter enemies
+    const targets: Array<{ x: number; y: number; color: number; priority: boolean }> = [];
 
     const bosses = this.world.query(["BossTag", "Transform"]);
     for (const e of bosses) {
       const t = this.world.getComponent<Transform>(e, "Transform")!;
-      targets.push({ x: t.x, y: t.y, color: 0xe74c3c });
+      targets.push({ x: t.x, y: t.y, color: 0xe74c3c, priority: true });
     }
 
     const caches = this.world.query(["CacheTag", "Transform"]);
     for (const e of caches) {
       const t = this.world.getComponent<Transform>(e, "Transform")!;
-      targets.push({ x: t.x, y: t.y, color: 0xf1c40f });
+      targets.push({ x: t.x, y: t.y, color: 0xf1c40f, priority: true });
     }
 
+    // Add tank and shooter enemies within 800px of the player
+    const enemies = this.world.query(["EnemyTag", "EnemyType", "Transform"]);
+    for (const e of enemies) {
+      const et = this.world.getComponent<EnemyType>(e, "EnemyType")!;
+      if (et.name !== "tank" && et.name !== "shooter") continue;
+      const t = this.world.getComponent<Transform>(e, "Transform")!;
+      const dx = t.x - pT.x;
+      const dy = t.y - pT.y;
+      if (dx * dx + dy * dy > 800 * 800) continue;
+      targets.push({ x: t.x, y: t.y, color: ENEMY_TYPES[et.name].color, priority: false });
+    }
+
+    // Sort: priority first (bosses/caches), then non-priority
+    targets.sort((a, b) => (a.priority === b.priority ? 0 : a.priority ? -1 : 1));
+
     let drawn = 0;
-    for (let i = 0; i < targets.length && drawn < 4; i++) {
+    for (let i = 0; i < targets.length && drawn < 6; i++) {
       const tgt = targets[i];
       const dx = tgt.x - pT.x;
       const dy = tgt.y - pT.y;

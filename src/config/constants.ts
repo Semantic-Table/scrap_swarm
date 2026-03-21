@@ -271,6 +271,12 @@ export const ENEMY_SPAWN_WEIGHTS: Record<EnemyTypeName, number> = {
   shooter: 10,
 };
 
+// Lava Vents
+export const VENT_SPAWN_INTERVAL = 45;
+export const VENT_RADIUS = 60;
+export const VENT_DAMAGE = 1;
+export const VENT_COLOR = 0xff4500;
+
 // Display
 export const BG_COLOR = "#1a1a2e";
 

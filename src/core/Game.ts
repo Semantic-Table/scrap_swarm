@@ -68,6 +68,13 @@ import { HudSystem } from "../systems/HudSystem";
 import { BossSystem } from "../systems/BossSystem";
 import { CameraSystem } from "../systems/CameraSystem";
 
+// CrazyGames SDK
+import {
+  initCrazySDK, showInterstitialAd,
+  gameplayStart as cgGameplayStart, gameplayStop as cgGameplayStop,
+  happyTime,
+} from "./CrazyGamesSDK";
+
 // Config
 import { hitStop } from "./HitStop";
 import { screenShake } from "./ScreenShake";
@@ -99,6 +106,8 @@ export class Game {
   private garageUI: GarageUI;
   private running = false;
   private paused = false;
+  private adBonusHp = 0;
+  private lastRunWasVictory = false;
 
   constructor() {
     this.app = new Application();
@@ -120,6 +129,9 @@ export class Game {
     });
 
     document.body.appendChild(this.app.canvas);
+
+    // Initialize CrazyGames SDK (no-op in local dev)
+    await initCrazySDK();
 
     // Remove loading screen
     const loading = document.getElementById("loading");
@@ -388,7 +400,7 @@ export class Game {
     });
     garagePill.on("pointertap", () => {
       this.app.stage.addChild(this.garageUI.container);
-      this.garageUI.show(sw, sh, 0, 0, 0, 0, () => { /* garage closed */ });
+      this.garageUI.show(sw, sh, 0, 0, 0, 0, false, () => { /* garage closed */ });
     });
     overlay.addChild(garagePill);
 
@@ -470,6 +482,7 @@ export class Game {
 
     this.registerSystems();
     this.running = true;
+    cgGameplayStart();
 
     this.app.stage.addChild(this.hudLayer);
     this.app.stage.addChild(this.upgradeUI.container);
@@ -582,7 +595,9 @@ export class Game {
     this.world.addComponent(entity, createCollider(PLAYER_SIZE));
     this.world.addComponent(entity, createPlayerTag());
     // Apply garage permanent bonuses
-    this.world.addComponent(entity, createHealth(PLAYER_HP + getGarageHpBonus()));
+    const totalHp = PLAYER_HP + getGarageHpBonus() + this.adBonusHp;
+    this.adBonusHp = 0; // Consume the bonus
+    this.world.addComponent(entity, createHealth(totalHp));
     this.world.addComponent(entity, createScrapCollector(SCRAP_PICKUP_RADIUS));
     const inventory = createInventory();
     inventory.slots.push({ itemId: "sword", level: 1 });
@@ -675,6 +690,7 @@ export class Game {
     if (choices.length === 0) return;
 
     playLevelUp();
+    happyTime();
     this.paused = true;
 
     this.upgradeUI.show(
@@ -688,6 +704,7 @@ export class Game {
         const evo = checkEvolutions(this.world);
         if (evo && this.hudSystem) {
           playEvolution();
+          happyTime();
           this.hudSystem.showAnnouncement(
             `EVOLUTION: ${evo.name}!`,
             this.app.screen.width,
@@ -730,12 +747,17 @@ export class Game {
 
   private victory(elapsed: number): void {
     this.running = false;
+    this.lastRunWasVictory = true;
+    cgGameplayStop();
+    happyTime();
     playVictory();
     this.showEndScreen("VICTORY", 0x2ecc71, elapsed);
   }
 
   private gameOver(): void {
     this.running = false;
+    this.lastRunWasVictory = false;
+    cgGameplayStop();
     playGameOver();
     this.showEndScreen("GAME OVER", 0xf0f0f0, this.getElapsed());
   }
@@ -939,16 +961,24 @@ export class Game {
   }
 
   private showGarage(cogsEarned: number, runTime: number, runKills: number, runLevel: number): void {
-    this.app.stage.addChild(this.garageUI.container);
-    this.garageUI.show(
-      this.app.screen.width,
-      this.app.screen.height,
-      cogsEarned,
-      runTime,
-      runKills,
-      runLevel,
-      () => { this.restart(); },
-    );
+    const openGarage = () => {
+      this.app.stage.addChild(this.garageUI.container);
+      this.garageUI.show(
+        this.app.screen.width,
+        this.app.screen.height,
+        cogsEarned,
+        runTime,
+        runKills,
+        runLevel,
+        !this.lastRunWasVictory,
+        (bonusHp: number) => {
+          this.adBonusHp = bonusHp;
+          this.restart();
+        },
+      );
+    };
+    // Show interstitial ad between runs, then open garage
+    showInterstitialAd().then(openGarage, openGarage);
   }
 
   private saveBestScore(time: number, kills: number, level: number): void {

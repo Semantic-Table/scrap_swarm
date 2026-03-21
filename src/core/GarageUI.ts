@@ -1,6 +1,7 @@
 import { Container, Graphics, Text, TextStyle } from "pixi.js";
 import { GARAGE_UPGRADES, type GarageUpgradeDef } from "../config/garageUpgrades";
 import { getCogs, getGarageLevel, purchaseGarageUpgrade } from "./Progress";
+import { showRewardedAd } from "./CrazyGamesSDK";
 
 const PANEL_W = 480;
 const ROW_H = 52;
@@ -17,7 +18,7 @@ export class GarageUI {
   private panel: Container;
   private scrollContent: Container;
   private scrollMask: Graphics;
-  private onClose: (() => void) | null = null;
+  private onClose: ((bonusHp: number) => void) | null = null;
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
   private wheelHandler: ((e: WheelEvent) => void) | null = null;
   private scrollY = 0;
@@ -29,6 +30,8 @@ export class GarageUI {
   private _runTime = 0;
   private _runKills = 0;
   private _runLevel = 0;
+  private _isDeath = false;
+  private _adBonusHp = 0;
 
   constructor() {
     this.container = new Container();
@@ -45,7 +48,8 @@ export class GarageUI {
     runTime: number,
     runKills: number,
     runLevel: number,
-    onClose: () => void,
+    isDeath: boolean,
+    onClose: (bonusHp: number) => void,
   ): void {
     this.onClose = onClose;
     this.cogsEarned = cogsEarned;
@@ -54,6 +58,8 @@ export class GarageUI {
     this._runTime = runTime;
     this._runKills = runKills;
     this._runLevel = runLevel;
+    this._isDeath = isDeath;
+    this._adBonusHp = 0;
     this.scrollY = 0;
     this.container.visible = true;
 
@@ -87,7 +93,7 @@ export class GarageUI {
       window.removeEventListener("wheel", this.wheelHandler);
       this.wheelHandler = null;
     }
-    if (this.onClose) this.onClose();
+    if (this.onClose) this.onClose(this._adBonusHp);
   }
 
   private scroll(delta: number): void {
@@ -214,6 +220,58 @@ export class GarageUI {
         this.scrollContent.y = -this.scrollY;
       }
     });
+
+    // Rewarded ad button — only show if player died (not on victory)
+    if (this._isDeath && this._adBonusHp === 0) {
+      const adBtn = new Container();
+      const adBtnBg = new Graphics();
+      const btnW = 220;
+      const btnH = 34;
+      const btnX = (screenW - btnW) / 2;
+      const btnY = py + panelH - 58;
+      adBtnBg.roundRect(btnX, btnY, btnW, btnH, 8).fill({ color: 0x1a3a1a });
+      adBtnBg.roundRect(btnX, btnY, btnW, btnH, 8).stroke({ color: 0x2ecc71, width: 1.5 });
+      adBtn.addChild(adBtnBg);
+
+      const adBtnText = new Text({
+        text: "Watch ad for +3 HP",
+        style: new TextStyle({ fontFamily: "monospace", fontSize: 13, fontWeight: "bold", fill: 0x2ecc71 }),
+      });
+      adBtnText.anchor.set(0.5);
+      adBtnText.x = screenW / 2;
+      adBtnText.y = btnY + btnH / 2;
+      adBtn.addChild(adBtnText);
+
+      adBtnBg.eventMode = "static";
+      adBtnBg.cursor = "pointer";
+      adBtnBg.on("pointertap", () => {
+        adBtnText.text = "Loading...";
+        adBtnText.style.fill = 0x888888;
+        adBtnBg.eventMode = "none";
+        showRewardedAd().then((watched) => {
+          if (watched) {
+            this._adBonusHp = 3;
+            adBtnText.text = "+3 HP next run!";
+            adBtnText.style.fill = 0x2ecc71;
+          } else {
+            adBtnText.text = "Watch ad for +3 HP";
+            adBtnText.style.fill = 0x2ecc71;
+            adBtnBg.eventMode = "static";
+          }
+        });
+      });
+
+      this.panel.addChild(adBtn);
+    } else if (this._isDeath && this._adBonusHp > 0) {
+      const adConfirm = new Text({
+        text: "+3 HP next run!",
+        style: new TextStyle({ fontFamily: "monospace", fontSize: 13, fontWeight: "bold", fill: 0x2ecc71 }),
+      });
+      adConfirm.anchor.set(0.5);
+      adConfirm.x = screenW / 2;
+      adConfirm.y = py + panelH - 42;
+      this.panel.addChild(adConfirm);
+    }
 
     // Play again hint
     const hint = new Text({

@@ -55,7 +55,7 @@
 
 ### P1 — Important
 
-- [ ] **CrazyGames SDK** — intégrer les ads (interstitiel entre les runs dans le Garage, rewarded ad pour +HP sur le death screen)
+- [x] **CrazyGames SDK** — interstitial ad entre les runs, rewarded ad "+3 HP" dans le Garage, gameplayStart/Stop, happyTime sur level up/evolution/victory
 - [x] **Spawn weights par type** — basic 30%, runner 25%, swarm 20%, tank 15%, shooter 10%
 - [x] **Damage numbers flottants** — "+N" float sur les hits ≥ 2 dégâts, coloré par type d'ennemi
 - [x] **Barres de vie sur les ennemis multi-HP** — 2px rouge au-dessus, visible quand blessé
@@ -77,7 +77,7 @@
 
 ### P3 — Nice to have
 
-- [ ] **Environmental hazards** — oil slicks (ralentissent), lava vents (dégâts zone)
+- [ ] **Environmental hazards** — lava vents (dégâts zone)
 - [ ] **Facing indicator pour le laser/chainsaw** — ces armes dépendent de l'orientation
 - [ ] **Speed lines** derrière le joueur quand il bouge vite
 - [ ] **Off-screen danger arrows** pour les tanks et shooters

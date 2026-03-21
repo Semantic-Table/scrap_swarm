@@ -66,12 +66,12 @@
 ### P2 — Polish
 
 - [x] **Descriptions d'upgrade en anglais** — tous les noms et descriptions traduits
-- [ ] **Musique qui s'intensifie par acte** — Act 1 calme, Act 3 plus rapide/intense
+- [x] **Musique qui s'intensifie par acte** — Level 1 baseline, Level 2 +3dB, Level 3 +6dB + 145 BPM
 - [x] **Screenshake sur pickup de power crate** — triggerShake(4, 0.1) au pickup
-- [ ] **Animation de la Swarm Queen** — rings concentriques qui pulsent, particules vertes
+- [x] **Animation de la Swarm Queen** — scale pulse sin(3Hz) ±8% + particules vertes 1-2/s
 - [x] **Queen death message** — "The Swarm Queen has fallen!" (vert) ou "The Swarm Queen survived..." (rouge)
 - [x] **Transition visuelle entre les actes** — "ACT 2" / "ACT 3" annonce + shake
-- [ ] **Tableau des scores** — top 5 runs affichés sur le title screen
+- [x] **Tableau des scores** — top 3 runs affichés sur le title overlay + top 5 en localStorage
 - [x] **Bouton mute** — icône speaker en haut à droite, click/tap toggle mute
 - [x] **Performance** — Particles.ts 100% ticker-driven, 0 rAF, pool + clearParticles au restart
 

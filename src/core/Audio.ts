@@ -107,6 +107,7 @@ export function disposeAudio(): void {
   }
 
   _initialized = false;
+  _currentIntensity = 1;
   _pickupCombo = 0;
   if (_pickupComboResetTimer !== null) {
     clearTimeout(_pickupComboResetTimer);
@@ -648,6 +649,11 @@ export function playGameOver(): void {
 
 let _musicNodes: Array<{ dispose(): void }> = [];
 
+/** Current music intensity level (1=Act1, 2=Act2, 3=Act3) */
+let _currentIntensity: 1 | 2 | 3 = 1;
+/** Baseline ambience gain value */
+const _baseAmbienceGain = 0.32;
+
 function _startAmbience(): void {
   if (_ambience) return;
 
@@ -1004,6 +1010,40 @@ function _startAmbience(): void {
     // loops (Tone.Loop implements dispose())
     kickLoop, snareLoop, hatLoop, bassLoop, padLoop, leadLoop,
   ];
+}
+
+/**
+ * Adjust music intensity based on game act.
+ * Level 1 (Act 1): baseline volume, 130 BPM
+ * Level 2 (Act 2): +3dB gain, 130 BPM
+ * Level 3 (Act 3): +6dB gain, 145 BPM
+ */
+export function setMusicIntensity(level: 1 | 2 | 3): void {
+  if (!_initialized || !_ambienceGain) return;
+  if (level === _currentIntensity) return;
+  _currentIntensity = level;
+
+  // Gain: +3dB ≈ ×1.41, +6dB ≈ ×2.0
+  let gainTarget: number;
+  let bpmTarget: number;
+  switch (level) {
+    case 1:
+      gainTarget = _baseAmbienceGain;
+      bpmTarget = 130;
+      break;
+    case 2:
+      gainTarget = _baseAmbienceGain * 1.41; // +3dB
+      bpmTarget = 130;
+      break;
+    case 3:
+      gainTarget = _baseAmbienceGain * 2.0;  // +6dB
+      bpmTarget = 145;
+      break;
+  }
+
+  // Smooth ramp over 2 seconds to avoid jarring transitions
+  _ambienceGain.gain.rampTo(gainTarget, 2.0);
+  Tone.getTransport().bpm.rampTo(bpmTarget, 2.0);
 }
 
 function _stopAmbience(): void {

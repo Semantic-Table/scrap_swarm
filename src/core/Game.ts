@@ -4,7 +4,7 @@ import { Input } from "./Input";
 import { UpgradeUI } from "./UpgradeUI";
 import { generateChoices } from "./UpgradeManager";
 import { applyUpgrade } from "./UpgradeEffects";
-import { recordRun } from "./Progress";
+import { recordRun, getTopRuns } from "./Progress";
 import { CodexUI } from "./CodexUI";
 import { DebugUI } from "./DebugUI";
 import { GarageUI } from "./GarageUI";
@@ -276,6 +276,7 @@ export class Game {
 
     // Best score (if exists)
     const best = this.loadBestScore();
+    let nextY = cy + 38;
     if (best) {
       const bestText = new Text({
         text: `Best: ${this.formatTime(best.time)}  |  ${best.kills} kills  |  Lv. ${best.level}`,
@@ -283,8 +284,25 @@ export class Game {
       });
       bestText.anchor.set(0.5);
       bestText.x = cx;
-      bestText.y = cy + 38;
+      bestText.y = nextY;
       overlay.addChild(bestText);
+      nextY += 18;
+    }
+
+    // Top 3 runs (compact list below best score)
+    const topRuns = getTopRuns();
+    if (topRuns.length > 0) {
+      const lines = topRuns.slice(0, 3).map(
+        (r, i) => `#${i + 1}  ${this.formatTime(r.time)}  |  ${r.kills} kills  |  Lv. ${r.level}`,
+      );
+      const topText = new Text({
+        text: lines.join("\n"),
+        style: new TextStyle({ fontFamily: "monospace", fontSize: 11, fill: 0x444455, lineHeight: 16 }),
+      });
+      topText.anchor.set(0.5, 0);
+      topText.x = cx;
+      topText.y = nextY + 2;
+      overlay.addChild(topText);
     }
 
     // Start prompt
@@ -764,7 +782,7 @@ export class Game {
     }
 
     // Record progress + check achievements
-    const newAchievements = recordRun(elapsed, killsByType, discoveredItems, discoveredEvolutions);
+    const newAchievements = recordRun(elapsed, killsByType, discoveredItems, discoveredEvolutions, playerLevel);
 
     // Calculate and save Cogs
     const isVictory = elapsed >= FLOW_TARGET_TIME;

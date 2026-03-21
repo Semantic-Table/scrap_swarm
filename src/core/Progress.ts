@@ -10,6 +10,12 @@ export interface AchievementDef {
   check: (data: ProgressData) => boolean;
 }
 
+export interface TopRun {
+  time: number;
+  kills: number;
+  level: number;
+}
+
 export interface ProgressData {
   kills: Record<string, number>;       // enemy type name → total kills
   itemsDiscovered: string[];           // item IDs seen at least once
@@ -21,6 +27,7 @@ export interface ProgressData {
   cogs: number;                        // current unspent Cogs
   totalCogsEarned: number;             // lifetime total
   garageUpgrades: Record<string, number>; // upgradeId → current level
+  topRuns: TopRun[];                   // top 5 runs sorted by time descending
 }
 
 // --- Achievements ---
@@ -70,6 +77,7 @@ function defaultData(): ProgressData {
     cogs: 0,
     totalCogsEarned: 0,
     garageUpgrades: {},
+    topRuns: [],
   };
 }
 
@@ -98,6 +106,7 @@ export function recordRun(
   runKills: Record<string, number>,
   discoveredItems: string[],
   discoveredEvolutions: string[] = [],
+  runLevel: number = 0,
 ): string[] {
   const data = loadProgress();
 
@@ -127,6 +136,12 @@ export function recordRun(
   data.bestKills = Math.max(data.bestKills, runTotal);
   data.totalRuns++;
 
+  // Update top 5 runs (sorted by time descending)
+  if (!data.topRuns) data.topRuns = [];
+  data.topRuns.push({ time: elapsed, kills: runTotal, level: runLevel });
+  data.topRuns.sort((a, b) => b.time - a.time);
+  if (data.topRuns.length > 5) data.topRuns.length = 5;
+
   // Check achievements
   const newlyUnlocked: string[] = [];
   for (const ach of ACHIEVEMENTS) {
@@ -138,6 +153,12 @@ export function recordRun(
 
   saveProgress(data);
   return newlyUnlocked;
+}
+
+/** Get top runs (up to 5, sorted by time descending) */
+export function getTopRuns(): TopRun[] {
+  const data = loadProgress();
+  return data.topRuns ?? [];
 }
 
 /** Get kill count for a specific enemy type across all runs */

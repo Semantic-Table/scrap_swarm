@@ -1,10 +1,12 @@
 import type { System } from "../ecs/types";
 import type { World } from "../ecs/World";
 import type { Transform } from "../components/Transform";
+import type { Sprite } from "../components/Sprite";
 import type { BossTag } from "../components/MapObject";
 import type { WaveState } from "../components/Wave";
 import type { Container } from "pixi.js";
 import { Graphics } from "pixi.js";
+import { spawnDeathParticles } from "../core/Particles";
 import { createTransform } from "../components/Transform";
 import { createVelocity } from "../components/Velocity";
 import { createSprite } from "../components/Sprite";
@@ -33,6 +35,9 @@ export class BossSystem implements System {
   private bossTimers = new Map<number, { attack: number; special: number }>();
   // Active shockwave rings
   private shockwaves: Array<{ g: Graphics; x: number; y: number; radius: number; maxRadius: number; speed: number; hitPlayer: boolean }> = [];
+  // Queen animation state
+  private queenElapsed = 0;
+  private queenParticleTimer = 0;
 
   constructor(world: World, stage: Container) {
     this.world = world;
@@ -40,6 +45,8 @@ export class BossSystem implements System {
   }
 
   update(dt: number): void {
+    this.queenElapsed += dt;
+
     const managers = this.world.query(["WaveState"]);
     if (managers.length === 0) return;
     const wave = this.world.getComponent<WaveState>(managers[0], "WaveState")!;
@@ -127,7 +134,7 @@ export class BossSystem implements System {
           }
           break;
 
-        case "queen":
+        case "queen": {
           if (timers.attack <= 0) {
             timers.attack = QUEEN_SWARM_INTERVAL;
             this.spawnSwarmRing(t.x, t.y);
@@ -136,7 +143,20 @@ export class BossSystem implements System {
             timers.special = QUEEN_PULSE_INTERVAL;
             this.fireBurst(t.x, t.y, QUEEN_PULSE_COUNT);
           }
+          // Pulsing scale animation
+          const spr = this.world.getComponent<Sprite>(entity, "Sprite");
+          if (spr) {
+            const scale = 1.0 + Math.sin(this.queenElapsed * 3) * 0.08;
+            spr.graphic.scale.set(scale);
+          }
+          // Spawn 1-2 small green particles per second
+          this.queenParticleTimer -= dt;
+          if (this.queenParticleTimer <= 0) {
+            this.queenParticleTimer = 0.5 + Math.random() * 0.5; // 1-2 per second
+            spawnDeathParticles(this.stage, t.x, t.y, 0x1abc9c, 2);
+          }
           break;
+        }
       }
     }
 
